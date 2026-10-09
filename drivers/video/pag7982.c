@@ -416,17 +416,26 @@ static int pag7982_hw_init(const struct device *dev)
 
 	k_msleep(5);
 
-	pag7982_write_all(dev, default_regs, ARRAY_SIZE(default_regs));
+	ret = pag7982_write_all(dev, default_regs, ARRAY_SIZE(default_regs));
 
 	uint32_t frame_time = config->pixclk / (config->frame_rate * 2);
 	LOG_DBG("pixclk %d frame_rate %d frame_time: %d\n", config->pixclk, config->frame_rate,
 		frame_time);
 
-	pag7982_write_reg(&config->i2c, BANK_SEL, 0x00);
-	pag7982_write_reg(&config->i2c, R_FRAMETIME_0, frame_time & 0xff);
-	pag7982_write_reg(&config->i2c, R_FRAMETIME_1, (frame_time >> 8) & 0xff);
-	pag7982_write_reg(&config->i2c, R_FRAMETIME_2, (frame_time >> 16) & 0xff);
-	pag7982_write_reg(&config->i2c, R_FRAMETIME_3, (frame_time >> 24) & 0xff);
+	if (ret == 0) {
+		ret |= pag7982_write_reg(&config->i2c, BANK_SEL, 0x00);
+		ret |= pag7982_write_reg(&config->i2c, R_FRAMETIME_0, frame_time & 0xff);
+		ret |= pag7982_write_reg(&config->i2c, R_FRAMETIME_1, (frame_time >> 8) & 0xff);
+		ret |= pag7982_write_reg(&config->i2c, R_FRAMETIME_2, (frame_time >> 16) & 0xff);
+		ret |= pag7982_write_reg(&config->i2c, R_FRAMETIME_3, (frame_time >> 24) & 0xff);
+	}
+	if (ret) {
+		/* A partly written register set would leave a sensor that streams
+		 * nothing; fail so the next resume starts over from reset. */
+		LOG_ERR("Failed to write sensor registers");
+		pag7982_hw_power_off(dev);
+		return -EIO;
+	}
 
 	// test partten
 	// pag7982_write_reg(&config->i2c, BANK_SEL, 0x04);
