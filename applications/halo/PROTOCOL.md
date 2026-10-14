@@ -1140,6 +1140,7 @@ Audio playback module supporting PCM and LC3.
 | `speaker.volume([val])` | `[val: number]` | `number` | Get or set volume (0–100) |
 | `speaker.stop()` | None | `nil` | Stop playback |
 | `speaker.stats([reset])` | `[reset: boolean]` | `table` | Playback accounting counters |
+| `speaker.le_audio([cfg])` | `[cfg: table]` | `table` | Get or set the budget and pre-gain for LE Audio system audio |
 
 #### `frame.speaker.start(cfg)`
 
@@ -1281,6 +1282,34 @@ handled.
 - **Example:**
   ```lua
   frame.speaker.stop()
+  ```
+
+#### `frame.speaker.le_audio([cfg])`
+
+Gets or sets the speaker levels used for audio a host plays over LE Audio
+(phone system audio such as music or video), which cannot pass `budget` or
+`gain` through `frame.speaker.start()`. The values are saved on the device
+and take effect at the next LE Audio stream start. The host's own volume
+control (VCS) still sets the volume.
+
+- **Parameters:**
+  - `[cfg: table]` - If provided, the new levels:
+
+  | Field | Type | Default | Description |
+  |-------|------|---------|-------------|
+  | `budget` | number | 0 | Energy-budget override, as in `frame.speaker.start()`: 0 uses the configured budget, or 10–100. |
+  | `gain` | number | 6 | Digital pre-gain into the protection limiter (0–12 dB), as in `frame.speaker.start()`. |
+
+  A field left out of `cfg` returns to its default, so `le_audio({})` restores both.
+- **Returns:** `table` - The levels in effect, `{budget = number, gain = number}`
+- **Errors:**
+  - Throws an error if `budget` is not 0 or 10–100, or `gain` is not 0–12
+- **Example:**
+  ```lua
+  local levels = frame.speaker.le_audio()
+  print(levels.budget, levels.gain)
+
+  frame.speaker.le_audio({gain = 3})
   ```
 
 #### `frame.speaker.stats([reset])`

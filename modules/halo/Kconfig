@@ -504,6 +504,35 @@ config HALO_BLE_AUDIO_SINK_ENABLE
 	  
 	  Default: enabled
 
+config HALO_BLE_AUDIO_SINK_BUDGET
+	int "LE Audio sink energy budget (0 = speaker default)"
+	depends on HALO_BLE_AUDIO_SINK_ENABLE
+	default 0
+	range 0 100
+	help
+	  Per-stream energy-budget override applied when an LE Audio sink
+	  stream (phone system audio) acquires the speaker, the same knob as
+	  frame.speaker.start{budget=N}. 0 keeps the configured speaker budget
+	  (MAX98357A_AUDIO_PROTECT_BUDGET_PERCENT). The display budget drop
+	  still applies on top. frame.speaker.le_audio{} overrides this at
+	  runtime.
+
+config HALO_BLE_AUDIO_SINK_GAIN_DB
+	int "LE Audio sink digital pre-gain (dB)"
+	depends on HALO_BLE_AUDIO_SINK_ENABLE
+	default 6
+	range 0 12
+	help
+	  Digital pre-gain into the speaker protection limiter applied to LE
+	  Audio sink streams, the same knob as frame.speaker.start{gain=N}.
+	  Lifts quiet sources and low phone volumes; hot sources are
+	  compressed by the limiter instead of getting louder, so the
+	  loudness ceiling (and battery current) is still set by the budget.
+	  Phones scale the stream linearly with their volume slider (a
+	  quarter of the way up is -12 dB), so without pre-gain system audio
+	  is much quieter than app streams that set gain.
+	  frame.speaker.le_audio{} overrides this at runtime.
+
 config HALO_BLE_AUDIO_SOURCE_ENABLE
 	bool "Enable LE Audio Source (Microphone)"
 	default n

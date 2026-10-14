@@ -717,6 +717,65 @@ static void source_encoder_thread_func(void *p1, void *p2, void *p3)
 	}
 }
 
+#ifdef CONFIG_HALO_BLE_AUDIO_SINK_ENABLE
+/* Persisted overrides of the LE Audio sink speaker levels; absent or -1
+ * means the Kconfig default.
+ */
+#define SINK_BUDGET_KEY "audio/le_budget"
+#define SINK_GAIN_KEY	"audio/le_gain"
+
+void halo_ble_audio_sink_levels_get(int *budget, int *gain_db)
+{
+	int b = -1;
+	int g = -1;
+
+	halo_settings_get(SINK_BUDGET_KEY, &b, sizeof(b));
+	halo_settings_get(SINK_GAIN_KEY, &g, sizeof(g));
+
+	if (budget) {
+		*budget = (b < 0) ? CONFIG_HALO_BLE_AUDIO_SINK_BUDGET : b;
+	}
+	if (gain_db) {
+		*gain_db = (g < 0) ? CONFIG_HALO_BLE_AUDIO_SINK_GAIN_DB : g;
+	}
+}
+
+int halo_ble_audio_sink_levels_set(int budget, int gain_db)
+{
+	if (budget < -1 || budget > 100 || (budget > 0 && budget < 10) || gain_db < -1 ||
+	    gain_db > 12) {
+		return -EINVAL;
+	}
+
+	halo_settings_set(SINK_BUDGET_KEY, &budget, sizeof(budget));
+	halo_settings_set(SINK_GAIN_KEY, &gain_db, sizeof(gain_db));
+	return 0;
+}
+
+/**
+ * @brief Apply the LE Audio sink budget and pre-gain to a freshly acquired speaker
+ *
+ * audio_speaker_init() resets both to the speaker defaults, so they are
+ * applied on every acquisition, before the stream starts (the budget is
+ * fixed at stream start).
+ */
+static void audio_datapath_sink_apply_levels(audio_speaker_t *spk)
+{
+	int budget;
+	int gain_db;
+
+	halo_ble_audio_sink_levels_get(&budget, &gain_db);
+
+	if (budget > 0) {
+		audio_speaker_set_stream_budget(spk, budget);
+	}
+	if (gain_db > 0) {
+		audio_speaker_set_stream_gain(spk, gain_db * 10);
+	}
+	LOG_INF("LE Audio sink levels: budget=%d gain=%d dB", budget, gain_db);
+}
+#endif
+
 /**
  * @brief Create audio sink datapath (BLE -> Speaker)
  *
@@ -789,6 +848,10 @@ static int audio_datapath_create_sink(struct audio_datapath_config const *const 
 		sink_datapath.channel_buffer = NULL;
 		return -EIO;
 	}
+
+#ifdef CONFIG_HALO_BLE_AUDIO_SINK_ENABLE
+	audio_datapath_sink_apply_levels(sink_datapath.speaker);
+#endif
 
 	/* Apply initial volume */
 	int volume_percent = sink_datapath.mute ? 0 : (sink_datapath.volume * 100 / 127);

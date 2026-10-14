@@ -11,6 +11,18 @@ release pages and tags are not publicly reachable.
 
 ## [Unreleased]
 
+### Added
+
+- LE Audio system audio (music or video a phone plays through Halo) gets a
+  6 dB pre-gain into the speaker limiter, like app streams that pass `gain`
+  to `frame.speaker.start()`. It used to play with no pre-gain, and because
+  the phone's volume slider scales the stream linearly, a quarter of the way
+  up was 12 dB below full volume. Measured on a Pixel 7 Pro, low and mid
+  phone volumes are about 6 dB louder; loud content at full volume is
+  unchanged, because the speaker budget still sets the ceiling.
+  `frame.speaker.le_audio({budget=, gain=})` changes both levels and saves
+  them on the device.
+
 ## [0.8.19] - 2026-10-07
 
 ### Added

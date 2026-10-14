@@ -90,6 +90,29 @@ uint16_t halo_ble_audio_get_tmap_roles(void);
  */
 void halo_ble_audio_get_context_types(uint16_t *sink_context_bf, uint16_t *src_context_bf);
 
+/**
+ * @brief Get the speaker levels applied to LE Audio sink streams
+ *
+ * The effective values: a persisted runtime override if one is set,
+ * otherwise HALO_BLE_AUDIO_SINK_BUDGET / HALO_BLE_AUDIO_SINK_GAIN_DB.
+ *
+ * @param budget Receives the energy budget (0 = speaker default); may be NULL
+ * @param gain_db Receives the digital pre-gain in dB; may be NULL
+ */
+void halo_ble_audio_sink_levels_get(int *budget, int *gain_db);
+
+/**
+ * @brief Persist the speaker levels applied to LE Audio sink streams
+ *
+ * Takes effect at the next sink stream start. -1 clears that override and
+ * restores the build default.
+ *
+ * @param budget 0 (speaker default) or 10..100, or -1
+ * @param gain_db 0..12 dB, or -1
+ * @return 0 on success, -EINVAL on an out-of-range value
+ */
+int halo_ble_audio_sink_levels_set(int budget, int gain_db);
+
 #ifdef __cplusplus
 }
 #endif
