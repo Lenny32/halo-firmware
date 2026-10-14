@@ -941,8 +941,13 @@ static int camera_service_event_handler(halo_lua_event_t event, void *user_data)
 #ifdef CONFIG_PM_DEVICE
 		if (camera_state.video != NULL) {
 			ret = pm_device_action_run(camera_state.video, PM_DEVICE_ACTION_RESUME);
-			if (ret != 0 && ret != -EALREADY && ret != -ENOSYS) {
+			if (ret == -EALREADY || ret == -ENOSYS) {
+				ret = 0;
+			} else if (ret != 0) {
+				/* Stay in power save so the next power_save(false) retries the
+				 * resume instead of reporting "already active". */
 				LOG_ERR("Failed to resume video device: %d", ret);
+				break;
 			}
 		}
 #endif
