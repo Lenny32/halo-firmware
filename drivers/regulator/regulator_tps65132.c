@@ -244,6 +244,11 @@ static int regulator_tps65132_enable(const struct device *dev)
 		k_sleep(K_MSEC(1));
 	}
 
+	/* Powering the chip and starting an output can glitch the I2C bus it
+	 * shares with the display and camera, leaving the controller waiting
+	 * for a STOP that never comes. Clear that before the bus is used. */
+	(void)i2c_recover_bus(common_config->i2c.bus);
+
 	/* Apply pending voltage setting if any */
 	if (data->voltage_pending) {
 		uint8_t current_vsel;
