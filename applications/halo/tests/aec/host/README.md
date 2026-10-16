@@ -132,9 +132,11 @@ double-talk check are where they show (19 above; 13 is -1.3dB vs -1.6).
 Setting the three splits to 0 together with KAPPA 0.15, ABSFLOOR 0.5,
 HANG 50, BETA 1.5 and FLOOR 0.1 restores the item-5 output byte for byte
 (tune_equiv.sh), and `cap_hi_split_hz` 0 alone the output before the top
-band. The top band (default 1.6kHz / 0.1) changes the host output only
-slightly (the synthetic echo path rolls off above ~2kHz, so little
-residual is left up there for it to cap): conv ERLE 20.0 -> 20.1dB.
+band. The top band (default 1.6kHz / 0.051; 0.1 up to 0.8.19)
+changes the host output only slightly (the synthetic echo path rolls off
+above ~2kHz, so little residual is left up there for it to cap): conv
+ERLE 20.0 -> 20.1dB at 0.1, and 0.1 -> 0.051 moves no check by more
+than 0.1dB.
 
 Check 23 covers runtime tuning (`frame.microphone.aec_tune`, 2026-10-04),
 through the same C API the Lua binding calls (`audio_aec_tune_set/get/

@@ -615,7 +615,7 @@ static void apply_env_tune(void)
 #define AEC_SUP_CAP_HI_SPLIT_HZ 1600
 #endif
 #ifndef AEC_SUP_CAP_HI_GCAP
-#define AEC_SUP_CAP_HI_GCAP 0.1f
+#define AEC_SUP_CAP_HI_GCAP 0.051f
 #endif
 #ifndef AEC_SUP_GATE_KAPPA_HF
 #define AEC_SUP_GATE_KAPPA_HF 0.15f
