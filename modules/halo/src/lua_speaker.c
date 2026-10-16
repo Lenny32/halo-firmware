@@ -18,6 +18,7 @@
 #include <halo/pm_manager.h>
 #include <halo/file_manager.h>
 #include <halo/ble_lua.h>
+#include <halo/ble_audio.h>
 
 #if defined(CONFIG_MAX98357A_AUDIO)
 #include <max98357a_audio.h>
@@ -907,6 +908,49 @@ static int lua_speaker_volume(lua_State *L)
 		lua_setfield(L, -2, name);                                     \
 	} while (0)
 
+#ifdef CONFIG_HALO_BLE_AUDIO_SINK_ENABLE
+/**
+ * @brief frame.speaker.le_audio([config])
+ *
+ * Get or set the speaker levels applied to LE Audio sink streams (phone
+ * system audio, which cannot pass budget/gain through frame.speaker.start).
+ * Persisted; takes effect at the next LE Audio stream start.
+ *
+ * @param config Optional table: budget (0 = speaker default, or 10-100) and
+ *   gain (0-12 dB). An omitted field restores that field's build default.
+ * @return table {budget, gain} of the effective values
+ */
+static int lua_speaker_le_audio(lua_State *L)
+{
+	if (lua_gettop(L) > 0) {
+		luaL_checktype(L, 1, LUA_TTABLE);
+
+		lua_getfield(L, 1, "budget");
+		int budget = lua_isnumber(L, -1) ? (int)lua_tointeger(L, -1) : -1;
+
+		lua_getfield(L, 1, "gain");
+		int gain_db = lua_isnumber(L, -1) ? (int)lua_tointeger(L, -1) : -1;
+
+		lua_pop(L, 2);
+
+		if (halo_ble_audio_sink_levels_set(budget, gain_db) != 0) {
+			return luaL_error(L, "budget must be 0 or 10-100, gain 0-12 dB");
+		}
+	}
+
+	int budget;
+	int gain_db;
+
+	halo_ble_audio_sink_levels_get(&budget, &gain_db);
+	lua_newtable(L);
+	lua_pushinteger(L, budget);
+	lua_setfield(L, -2, "budget");
+	lua_pushinteger(L, gain_db);
+	lua_setfield(L, -2, "gain");
+	return 1;
+}
+#endif
+
 /**
  * @brief frame.speaker.stats([reset])
  *
@@ -1113,6 +1157,7 @@ HALO_LUA_SERVICE_DEFINE(speaker_service, speaker_service_event_handler, NULL, fa
  *   - play(data) - Direct playback
  *   - volume(level) - Set volume
  *   - stats([reset]) - Playback accounting
+ *   - le_audio([config]) - LE Audio sink budget/pre-gain
  */
 int lua_open_speaker_library(lua_State *L)
 {
@@ -1149,6 +1194,9 @@ int lua_open_speaker_library(lua_State *L)
 						 {"play", lua_speaker_play},
 						 {"volume", lua_speaker_volume},
 						 {"stats", lua_speaker_stats},
+#ifdef CONFIG_HALO_BLE_AUDIO_SINK_ENABLE
+						 {"le_audio", lua_speaker_le_audio},
+#endif
 						 {NULL, NULL}};
 
 	luaL_setfuncs(L, speaker_funcs, 0);
