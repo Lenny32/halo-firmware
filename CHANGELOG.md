@@ -23,6 +23,19 @@ release pages and tags are not publicly reachable.
   `frame.speaker.le_audio({budget=, gain=})` changes both levels and saves
   them on the device.
 
+### Changed
+
+- Echo cancellation removes more of the 1.6–3.4 kHz echo. While a reply
+  plays and the gate hears no wearer, that band's ceiling
+  (`cap_hi_gcap` in `frame.microphone.aec_tune`) is now 0.051 (about
+  −26 dB), down from 0.1 (−20 dB). On two units on the desk, about 5 dB
+  more of the echo in that band was removed, the gate stayed shut on echo,
+  and the talker, alone and during double talk, was unchanged. Replays of
+  every worn and desk calibration capture (two units, microphone gains 1
+  and 4) agree: 0.1 to 2.5 dB more echo removed overall, with the wearer's
+  speech and the time to interrupt unchanged. `aec_tune{cap_hi_gcap=0.1}`
+  restores the old ceiling.
+
 ## [0.8.19] - 2026-10-07
 
 ### Added

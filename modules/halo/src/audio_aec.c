@@ -842,12 +842,19 @@ LOG_MODULE_REGISTER(audio_aec, CONFIG_HALO_LOG_LEVEL);
  * echo): 1.6-3.4kHz 15.2 -> 22.1dB on Halo 28, 14.4 -> 21.3dB on the EC,
  * talker frames cut by more than 10dB 6/126 -> 6/123 and 3/118 -> 5/113,
  * inside the run-to-run spread (0-11).
+ * 0.051 (-26dB), 2026-10-09: replayed on every calibration capture (worn
+ * Halo 28 at gains 1 and 4, two worn Halo 04 sittings, desk Halo 28 incl.
+ * the strongly coupled one) echo removal rose 0.1-2.5dB (1.6-3.4kHz
+ * ~+5.7dB), gate on echo stayed 0, kept and crushed moved <= 0.02 and
+ * 0.003, time to pass unchanged. Desk A/B on two units: 1.6-3.4kHz
+ * about +5dB on both (EC at gain 1, Halo 28 at gain 4), gate shut on
+ * echo, talker and double talk inside the defaults' spread, none crushed.
  */
 #ifndef AEC_SUP_CAP_HI_SPLIT_HZ
 #define AEC_SUP_CAP_HI_SPLIT_HZ 1600
 #endif
 #ifndef AEC_SUP_CAP_HI_GCAP
-#define AEC_SUP_CAP_HI_GCAP 0.1f
+#define AEC_SUP_CAP_HI_GCAP 0.051f
 #endif
 /* High-band reference term of the near-end gate: the gate's excess also
  * subtracts KAPPA_HF x (the reference amplitude from GATE_HF_HZ up to
