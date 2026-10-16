@@ -11,6 +11,8 @@ release pages and tags are not publicly reachable.
 
 ## [Unreleased]
 
+## [0.8.20] - 2026-10-16
+
 ### Added
 
 - LE Audio system audio (music or video a phone plays through Halo) gets a
@@ -21,7 +23,7 @@ release pages and tags are not publicly reachable.
   phone volumes are about 6 dB louder; loud content at full volume is
   unchanged, because the speaker budget still sets the ceiling.
   `frame.speaker.le_audio({budget=, gain=})` changes both levels and saves
-  them on the device.
+  them on the device (#73).
 
 ### Changed
 
@@ -34,7 +36,25 @@ release pages and tags are not publicly reachable.
   every worn and desk calibration capture (two units, microphone gains 1
   and 4) agree: 0.1 to 2.5 dB more echo removed overall, with the wearer's
   speech and the time to interrupt unchanged. `aec_tune{cap_hi_gcap=0.1}`
-  restores the old ceiling.
+  restores the old ceiling (#75).
+
+### Fixed
+
+- The display and camera could stop responding after a wake from standby
+  until the next reboot (`frame.display.power_save(false)` failing with -11,
+  `frame.camera.power_save(false)` with -19). Powering up the display's bias
+  supply can glitch the I2C bus it shares with the display and camera, and
+  the I2C controller then held every later transfer on that bus. The Zephyr
+  I2C driver now recovers the controller when a transfer times out, and the
+  bias supply driver resets the bus once its output is on, so the display's
+  first write does not have to wait for that timeout. In 1000 standby and
+  wake cycles on a unit that had failed within 3 to 35, none failed and
+  every display wake took 0.40 s (#74).
+- If the camera sensor failed to resume, the next
+  `frame.camera.power_save(false)` reported the camera as already active and
+  every capture timed out until a reboot. The camera now stays in power save
+  until a resume succeeds, so the next call retries it, and a sensor whose
+  setup fails is powered off so the retry starts from reset (#74).
 
 ## [0.8.19] - 2026-10-07
 
