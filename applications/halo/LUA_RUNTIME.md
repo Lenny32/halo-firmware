@@ -93,10 +93,15 @@ Consequences worth knowing:
   and are delivered, in order, as soon as it returns. The idle REPL runs a
   trivial chunk every 20 ms so callbacks still fire with no script running.
 - BLE data frames are queued in `ble_lua.c` as `[len16][payload]` records in a
-  `CONFIG_HALO_LUA_MAX_DATA_SIZE` ring. **One client write is one callback**,
-  whatever the script was doing. If the ring is full the write is refused
-  with `ATT_ERR_INSUFF_RESOURCE` so the client sees back-pressure instead of
-  silent loss.
+  ring of `CONFIG_HALO_LUA_MAX_DATA_SIZE` bytes, which
+  `frame.bluetooth.receive_buffer_size()` can resize. **One client write is
+  one callback**, whatever the script was doing. If the ring is full the
+  write is refused with `ATT_ERR_INSUFF_RESOURCE`: a write request sees the
+  error, but a write command (without response) is lost silently, so such a
+  client must window on acknowledgements from the callback.
+- Holding back the ATT confirm until the ring drains is **not** flow control
+  for write commands: the Alif host keeps accepting them and queues PDUs in
+  its own heap until `ALIF_BLE_HOST_ADDL_PRF_HEAPSIZE` runs out and asserts.
 - Frames that arrive with no `receive_callback` registered are discarded.
 - `frame.compression.decompress()` calls its `process_function` synchronously,
   once per block, from inside the decompress call - it needs no hook at all.
@@ -258,6 +263,8 @@ frame.file.remove(path)
 ```lua
 frame.bluetooth.send(data)
 frame.bluetooth.receive_callback(callback)
+frame.bluetooth.receive_buffer_size([bytes])
+frame.bluetooth.connection_interval([ms])
 ```
 
 ### Display (`frame.display`)

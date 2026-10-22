@@ -82,6 +82,7 @@ struct ble_lua_ctx {
 	 * header + payload atomic against the reader and makes reset safe
 	 * against a concurrent read. */
 	uint8_t *data_rx_buf;
+	size_t data_rx_size;
 	struct ring_buf data_rx_ring;
 	struct k_spinlock data_lock;
 	halo_ble_lua_data_handler_t data_handler;
@@ -659,6 +660,7 @@ int halo_ble_lua_init(bool reset)
 		      lua_ctx.repl_rx_buf);
 	ring_buf_init(&lua_ctx.data_rx_ring, CONFIG_HALO_LUA_MAX_DATA_SIZE + 1,
 		      lua_ctx.data_rx_buf);
+	lua_ctx.data_rx_size = CONFIG_HALO_LUA_MAX_DATA_SIZE;
 	ring_buf_init(&lua_ctx.audio_rx_ring, CONFIG_HALO_AUDIO_MAX_DATA_SIZE + 1,
 		      lua_ctx.audio_rx_buf);
 
@@ -713,12 +715,18 @@ int halo_ble_lua_deinit(void)
 
 	halo_ble_service_unregister(&lua_service);
 
-	/* Free allocated buffers */
+	/* Free allocated buffers. The data ring is swapped out under its lock
+	 * so a concurrent halo_ble_lua_data_resize() cannot free it too. */
+	k_spinlock_key_t key = k_spin_lock(&lua_ctx.data_lock);
+	uint8_t *data_buf = lua_ctx.data_rx_buf;
+
+	lua_ctx.data_rx_buf = NULL;
+	k_spin_unlock(&lua_ctx.data_lock, key);
+
 	halo_free(lua_ctx.repl_rx_buf);
-	halo_free(lua_ctx.data_rx_buf);
+	halo_free(data_buf);
 	halo_free(lua_ctx.audio_rx_buf);
 	lua_ctx.repl_rx_buf = NULL;
-	lua_ctx.data_rx_buf = NULL;
 	lua_ctx.audio_rx_buf = NULL;
 
 	return 0;
@@ -777,6 +785,48 @@ int32_t halo_ble_lua_data_read_frame(uint8_t *data, size_t len)
 	k_spin_unlock(&lua_ctx.data_lock, key);
 
 	return ret;
+}
+
+int halo_ble_lua_data_resize(size_t size)
+{
+	if (lua_ctx.initialized != BLE_LUA_INIT_MAGIC) {
+		return -ENODEV;
+	}
+
+	if (size == lua_ctx.data_rx_size) {
+		return 0;
+	}
+
+	uint8_t *buf = halo_mem_alloc(size + 1);
+
+	if (!buf) {
+		return -ENOMEM;
+	}
+
+	/* Every ring access holds data_lock, so once the swap is done nothing
+	 * can still be using the old buffer. Queued frames are dropped. */
+	k_spinlock_key_t key = k_spin_lock(&lua_ctx.data_lock);
+	uint8_t *old = lua_ctx.data_rx_buf;
+
+	/* The service may have been torn down since the check above */
+	if (lua_ctx.initialized != BLE_LUA_INIT_MAGIC || old == NULL) {
+		k_spin_unlock(&lua_ctx.data_lock, key);
+		halo_free(buf);
+		return -ENODEV;
+	}
+
+	lua_ctx.data_rx_buf = buf;
+	lua_ctx.data_rx_size = size;
+	ring_buf_init(&lua_ctx.data_rx_ring, size + 1, buf);
+	k_spin_unlock(&lua_ctx.data_lock, key);
+
+	halo_free(old);
+	return 0;
+}
+
+size_t halo_ble_lua_data_size(void)
+{
+	return lua_ctx.initialized == BLE_LUA_INIT_MAGIC ? lua_ctx.data_rx_size : 0;
 }
 
 void halo_ble_lua_data_flush(void)

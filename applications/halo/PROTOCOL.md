@@ -806,6 +806,8 @@ Bluetooth module APIs.
 | `bluetooth.max_length()` | None | `number` | Max send length |
 | `bluetooth.send(data)` | `<data: string>` | None | Send data |
 | `bluetooth.receive_callback(func)` | `<func: function/nil>` | `nil` | Set receive callback |
+| `bluetooth.receive_buffer_size([bytes])` | `<bytes: integer>` (optional) | `number` | Get or resize the receive queue |
+| `bluetooth.connection_interval([ms])` | `<ms: number>` (optional) | `number/nil` | Get the interval, or request one |
 
 #### `frame.bluetooth.is_connected()`
 
@@ -876,10 +878,16 @@ Registers or clears data receive callback.
   order. The callback runs on the Lua thread between VM instructions, so
   packets that land while the script is inside a blocking call
   (`frame.sleep()`, a display write, ...) queue and are delivered as soon as
-  it returns. The queue holds about 4 KB; when it is full the device refuses
-  the write at the ATT level (`Insufficient Resources`) so the client can
-  retry — packets are never silently dropped. Packets received while no
-  callback is registered are discarded.
+  it returns. The queue holds 4 KB by default (see
+  `receive_buffer_size()`); each queued packet takes its length plus 2 bytes.
+  When it is full the device refuses the write at the ATT level
+  (`Insufficient Resources`). A write *with* response sees that error and can
+  retry; a write *without* response cannot, so that packet is **lost
+  silently**. A client sending without response must therefore pace itself
+  on acknowledgements from the callback: keeping at most
+  `size / (packet + 2)` packets unacknowledged can never overflow the queue,
+  however slow the callback. Packets received while no callback is
+  registered are discarded.
 - **Example:**
   ```lua
   frame.bluetooth.receive_callback(function(data)
@@ -888,6 +896,48 @@ Registers or clears data receive callback.
   
   -- Clear callback
   frame.bluetooth.receive_callback(nil)
+  ```
+
+#### `frame.bluetooth.receive_buffer_size([bytes])`
+
+Gets, or resizes, the queue that holds received data packets until the
+receive callback runs. A larger queue lets a client keep more packets in
+flight, which matters on links that move more data per connection interval.
+
+- **Parameters:** `<bytes: integer>` (optional) - New capacity, 1024 to 65536
+- **Returns:** `number` - The capacity in bytes
+- **Notes:** Resizing discards any packets still queued, so do it before the
+  client starts sending. The size returns to the 4096-byte default when the
+  Lua VM restarts.
+- **Errors:** Throws an error if the size is out of range or memory runs out
+- **Example:**
+  ```lua
+  frame.bluetooth.receive_buffer_size(16384)
+  ```
+
+#### `frame.bluetooth.connection_interval([ms])`
+
+Gets the current BLE connection interval, or asks the central (phone or
+computer) for a new one. Data moves once per interval, so a shorter interval
+gives more throughput and lower latency, at a power cost on both sides.
+
+- **Parameters:** `<ms: number>` (optional) - Requested interval, 7.5 to 1000 ms
+- **Returns:** with no argument, the current interval in ms, or `nil` when
+  not connected; with an argument, nothing
+- **Notes:**
+  - The request is asynchronous and the central decides. Read the interval
+    back to see what was granted. iOS and macOS grant 15 ms and multiples of
+    15 ms, nothing shorter.
+  - macOS has been seen refusing requests for several seconds after some
+    connects; the device retries for about 15 s before giving up.
+  - Request a short interval around a bulk transfer and a longer one (e.g.
+    `30`) afterwards.
+- **Errors:** Throws an error if not connected or the interval is out of range
+- **Example:**
+  ```lua
+  frame.bluetooth.connection_interval(15)
+  -- ... later
+  print(frame.bluetooth.connection_interval())  -- 15.0 once granted
   ```
 
 ---

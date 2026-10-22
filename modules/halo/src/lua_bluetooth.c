@@ -201,6 +201,87 @@ static int lua_bluetooth_send(lua_State *L)
 	return 0;
 }
 
+/* Supervision timeout for interval requests: 4 s sits inside Apple's 2-6 s
+ * accessory rule. With latency 0 it must exceed 2x the interval (Core spec)
+ * and 3x it (Apple), hence the 1000 ms interval cap. */
+#define CONN_SUP_TIMEOUT_10MS 400
+#define CONN_INTERVAL_MAX_MS  1000
+
+/**
+ * @brief Lua: frame.bluetooth.connection_interval([ms])
+ *
+ * With no argument, return the current connection interval in ms (nil when
+ * not connected). With an argument, ask the central for that interval and
+ * return immediately; the central decides, so read the interval back later
+ * to see what it granted. iOS/macOS grant 15 ms (and multiples of 15), not
+ * less. A short interval costs power: request it around bulk transfers and
+ * ask for a longer one afterwards.
+ */
+static int lua_bluetooth_connection_interval(lua_State *L)
+{
+	if (lua_isnoneornil(L, 1)) {
+		uint16_t units = halo_ble_get_conn_interval();
+
+		if (units == 0) {
+			lua_pushnil(L);
+		} else {
+			lua_pushnumber(L, units * 1.25);
+		}
+		return 1;
+	}
+
+	lua_Number ms = luaL_checknumber(L, 1);
+
+	/* Written so that NaN fails too */
+	if (!(ms >= 7.5 && ms <= CONN_INTERVAL_MAX_MS)) {
+		return luaL_error(L, "interval must be between 7.5 and %d ms", CONN_INTERVAL_MAX_MS);
+	}
+
+	uint16_t units = (uint16_t)(ms / 1.25 + 0.5);
+	struct halo_ble_conn_params params = {
+		.interval_min = units,
+		.interval_max = units,
+		.latency = 0,
+		.timeout = CONN_SUP_TIMEOUT_10MS,
+	};
+	int ret = halo_ble_update_conn_params(&params);
+
+	if (ret == -ENOTCONN) {
+		return luaL_error(L, "not connected");
+	}
+	if (ret < 0) {
+		return luaL_error(L, "connection interval request failed: %d", ret);
+	}
+	return 0;
+}
+
+/**
+ * @brief Lua: frame.bluetooth.receive_buffer_size([bytes])
+ *
+ * With no argument, return the capacity of the data receive buffer. With an
+ * argument, resize it and drop anything still queued. The size returns to
+ * the default when the Lua VM restarts.
+ */
+static int lua_bluetooth_receive_buffer_size(lua_State *L)
+{
+	if (!lua_isnoneornil(L, 1)) {
+		lua_Integer size = luaL_checkinteger(L, 1);
+
+		if (size < 1024 || size > 65536) {
+			return luaL_error(L, "size must be between 1024 and 65536 bytes");
+		}
+
+		int ret = halo_ble_lua_data_resize((size_t)size);
+
+		if (ret < 0) {
+			return luaL_error(L, "resize failed: %d", ret);
+		}
+	}
+
+	lua_pushinteger(L, (lua_Integer)halo_ble_lua_data_size());
+	return 1;
+}
+
 /**
  * @brief Lua: frame.bluetooth.receive_callback(function)
  *
@@ -264,6 +345,12 @@ static int bluetooth_service_event_handler(halo_lua_event_t event, void *user_da
 	case HALO_LUA_EVENT_DEINIT:
 		/* Callback will be cleaned up by Lua GC */
 		bt_callback_state.callback_ref = LUA_NOREF;
+		/* The next app starts from the default receive buffer */
+		int ret = halo_ble_lua_data_resize(CONFIG_HALO_LUA_MAX_DATA_SIZE);
+
+		if (ret < 0 && ret != -ENODEV) {
+			LOG_WRN("Could not restore the default receive buffer: %d", ret);
+		}
 		break;
 
 	default:
@@ -317,6 +404,12 @@ int lua_open_bluetooth_library(lua_State *L)
 
 	lua_pushcfunction(L, lua_bluetooth_receive_callback);
 	lua_setfield(L, -2, "receive_callback");
+
+	lua_pushcfunction(L, lua_bluetooth_connection_interval);
+	lua_setfield(L, -2, "connection_interval");
+
+	lua_pushcfunction(L, lua_bluetooth_receive_buffer_size);
+	lua_setfield(L, -2, "receive_buffer_size");
 
 	/* Set 'bluetooth' table in 'frame' */
 	lua_setfield(L, -2, "bluetooth");
