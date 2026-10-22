@@ -96,6 +96,10 @@ static struct {
  * halo_ble_conn_init() a silent no-op: device up, BLE dead, no advertising. */
 static bool conn_ctx_valid_this_boot;
 
+/* Current connection interval in 1.25 ms units, 0 when not connected. Kept
+ * out of the noinit conn_ctx so its layout stays fixed across images. */
+static uint16_t conn_interval;
+
 const gapc_le_con_param_nego_with_ce_len_t preferred_connection_param = {
 	.ce_len_min = 5,
 	.ce_len_max = 10,
@@ -898,20 +902,88 @@ int halo_ble_conn_get_address(uint8_t addr[6])
 	return 0;
 }
 
+/* macOS refuses a parameter request with LL_ERR_UNACCEPTABLE_CONN_PARAM for
+ * several seconds after some connects (seen right after a device reboot),
+ * then grants the same request; a request can also collide with a procedure
+ * the central started. Both are transient, so retry a few times. */
+#define PARAM_RETRY_COUNT    15
+#define PARAM_RETRY_DELAY_MS 1000
+
+static void param_retry_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(param_retry_work, param_retry_handler);
+/* Retry state: guarded by the BLE mutex. param_generation tags each new
+ * request (as the procedure metainfo) so a late completion of a superseded
+ * request cannot schedule retries of its own. */
+static struct halo_ble_conn_params param_retry_params;
+static uint8_t param_retries_left;
+static uint32_t param_generation;
+
+static int submit_update_params(const struct halo_ble_conn_params *params);
+
+static void on_update_params_cmp(uint8_t conidx, uint32_t metainfo, uint16_t status)
+{
+	if (status == GAP_ERR_NO_ERROR) {
+		return;
+	}
+
+	bool transient = status == LL_ERR_UNACCEPTABLE_CONN_PARAM ||
+			 status == LL_ERR_DIFF_TRANSACTION_COLLISION ||
+			 status == LL_ERR_LMP_COLLISION;
+
+	if (metainfo != param_generation) {
+		return; /* superseded by a newer request */
+	}
+	if (transient && param_retries_left > 0 && conn_ctx.connected) {
+		param_retries_left--;
+		LOG_DBG("Connection parameter update refused (0x%02x), retrying", status);
+		k_work_reschedule(&param_retry_work, K_MSEC(PARAM_RETRY_DELAY_MS));
+		return;
+	}
+	LOG_WRN("Connection parameter update failed: 0x%02x", status);
+}
+
+static void param_retry_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	alif_ble_mutex_lock(K_FOREVER);
+	struct halo_ble_conn_params params = param_retry_params;
+
+	submit_update_params(&params);
+	alif_ble_mutex_unlock();
+}
+
+uint16_t halo_ble_conn_get_interval(void)
+{
+	return conn_ctx.connected ? conn_interval : 0;
+}
+
 int halo_ble_conn_update_params(const struct halo_ble_conn_params *params)
+{
+	if (!params) {
+		return -EINVAL;
+	}
+
+	/* A new request supersedes any retry still pending. The BLE mutex is
+	 * recursive, so submit_update_params() may take it again. */
+	alif_ble_mutex_lock(K_FOREVER);
+	k_work_cancel_delayable(&param_retry_work);
+	param_retry_params = *params;
+	param_retries_left = PARAM_RETRY_COUNT;
+	param_generation++;
+
+	int err = submit_update_params(params);
+
+	alif_ble_mutex_unlock();
+	return err;
+}
+
+static int submit_update_params(const struct halo_ble_conn_params *params)
 {
 	int err;
 
 	if (!params) {
 		return -EINVAL;
-	}
-
-	if (conn_ctx.initialized != BLE_CONNECTION_INIT_MAGIC) {
-		return -ENODEV;
-	}
-
-	if (!conn_ctx.connected) {
-		return -ENOTCONN;
 	}
 
 	/* Convert to Alif BLE format with CE length */
@@ -927,8 +999,24 @@ int halo_ble_conn_update_params(const struct halo_ble_conn_params *params)
 		.ce_len_max = 0xFFFF,
 	};
 
-	/* Update connection parameters using Alif BLE API */
-	err = gapc_le_update_params(conn_ctx.conidx, 0, &con_params_full, NULL);
+	/* Callers run off the BLE host thread (e.g. the Lua REPL), and the host
+	 * stack is not thread-safe: unlocked, this raced the ATT write that
+	 * triggered it and lost its Write Response (ATT timeout, link drop,
+	 * advertising never restarted). The stack also rejects a NULL completion
+	 * callback with GAP_ERR_INVALID_PARAM. */
+	alif_ble_mutex_lock(K_FOREVER);
+	/* Checked under the mutex, so a disconnect cannot slip in between */
+	if (conn_ctx.initialized != BLE_CONNECTION_INIT_MAGIC) {
+		alif_ble_mutex_unlock();
+		return -ENODEV;
+	}
+	if (!conn_ctx.connected) {
+		alif_ble_mutex_unlock();
+		return -ENOTCONN;
+	}
+	err = gapc_le_update_params(conn_ctx.conidx, param_generation, &con_params_full,
+				    on_update_params_cmp);
+	alif_ble_mutex_unlock();
 	if (err != GAP_ERR_NO_ERROR) {
 		LOG_ERR("gapc_le_update_params failed: %u", err);
 		return -EIO;
@@ -1009,6 +1097,8 @@ void halo_ble_conn_on_connected(uint8_t conidx, uint16_t mtu)
  */
 void halo_ble_conn_on_disconnected(uint8_t conidx, uint16_t reason)
 {
+	k_work_cancel_delayable(&param_retry_work);
+
 	if (conn_ctx.initialized != BLE_CONNECTION_INIT_MAGIC) {
 		return;
 	}
@@ -1090,6 +1180,8 @@ static void on_le_connection_req(uint8_t const conidx, uint32_t const metainfo,
 {
 	/* Prevent sleep during connection process */
 	halo_pm_prevent_sleep();
+
+	conn_interval = p_con_params->interval;
 
 	/* Update activity timestamp */
 	halo_ble_conn_update_activity();
@@ -1316,7 +1408,10 @@ void on_param_update_req(uint8_t conidx, uint32_t metainfo, const gapc_le_con_pa
  */
 void on_param_updated(uint8_t conidx, uint32_t metainfo, const gapc_le_con_param_t *p_param)
 {
-	return;
+	conn_interval = p_param->interval;
+	LOG_INF("Connection parameters: interval %u.%02u ms, latency %u, timeout %u ms",
+		p_param->interval * 125 / 100, p_param->interval * 125 % 100, p_param->latency,
+		p_param->sup_to * 10);
 }
 
 /**

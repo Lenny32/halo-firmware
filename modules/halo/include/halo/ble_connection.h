@@ -96,6 +96,13 @@ int halo_ble_conn_get_address(uint8_t addr[6]);
 int halo_ble_conn_update_params(const struct halo_ble_conn_params *params);
 
 /**
+ * @brief Get the current connection interval
+ *
+ * @return Interval in 1.25 ms units, 0 when not connected
+ */
+uint16_t halo_ble_conn_get_interval(void);
+
+/**
  * @brief Update activity timestamp
  */
 void halo_ble_conn_update_activity(void);
