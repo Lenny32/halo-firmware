@@ -129,7 +129,10 @@ static int iso_datapath_ctoh_bind(struct iso_datapath_ctoh *const datapath)
 {
 	uint16_t ret;
 
+	/* Called from the audio work queue and the BLE thread */
+	alif_ble_mutex_lock(K_FOREVER);
 	ret = gapi_isooshm_dp_bind(&datapath->dp, datapath->stream_id, GAPI_DP_DIRECTION_OUTPUT);
+	alif_ble_mutex_unlock();
 	if (ret != GAP_ERR_NO_ERROR) {
 		LOG_ERR("Failed to bind datapath (stream_lid %u) with err %u", datapath->stream_id,
 			ret);
@@ -147,7 +150,9 @@ static int iso_datapath_ctoh_unbind(struct iso_datapath_ctoh *const datapath)
 	/* Ignore return value to allow application to call this even the
 	 * datapath is not binded yet
 	 */
+	alif_ble_mutex_lock(K_FOREVER);
 	gapi_isooshm_dp_unbind(&datapath->dp, &pending_buffer);
+	alif_ble_mutex_unlock();
 
 	if (pending_buffer) {
 		/* Free the buffer that was pending in the datapath */

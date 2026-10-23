@@ -408,14 +408,6 @@ int halo_ble_conn_adv_start(const struct halo_ble_adv_params *params)
 		return -ENODEV;
 	}
 
-	k_mutex_lock(&conn_ctx.lock, K_FOREVER);
-
-	if (conn_ctx.advertising) {
-		k_mutex_unlock(&conn_ctx.lock);
-		LOG_DBG("Already advertising");
-		return 0;
-	}
-
 	/* Set advertising parameters - using real Alif BLE API */
 	adv_create_params.prop = GAPM_ADV_PROP_UNDIR_CONN_MASK;
 	adv_create_params.disc_mode = GAPM_ADV_MODE_GEN_DISC;
@@ -439,9 +431,30 @@ int halo_ble_conn_adv_start(const struct halo_ble_adv_params *params)
 	}
 	adv_create_params.prim_cfg.phy = GAPM_PHY_TYPE_LE_1M;
 
-	/* Create advertising activity - real Alif BLE call with simple retry */
+	/* Create advertising activity, with a simple retry. Take the host
+	 * stack lock before conn_ctx.lock, the order the BLE thread uses
+	 * (it holds the stack lock while callbacks take conn_ctx.lock), and
+	 * release both between attempts so the stack can run.
+	 */
 	for (int i = 0; i < 3; i++) {
+		alif_ble_mutex_lock(K_FOREVER);
+		k_mutex_lock(&conn_ctx.lock, K_FOREVER);
+
+		if (conn_ctx.advertising) {
+			k_mutex_unlock(&conn_ctx.lock);
+			alif_ble_mutex_unlock();
+			LOG_DBG("Already advertising");
+			return 0;
+		}
+
 		err = gapm_le_create_adv_legacy(0, GAPM_STATIC_ADDR, &adv_create_params, &le_adv_cbs);
+		if (err == GAP_ERR_NO_ERROR) {
+			conn_ctx.advertising = true;
+		}
+
+		k_mutex_unlock(&conn_ctx.lock);
+		alif_ble_mutex_unlock();
+
 		if (err == GAP_ERR_NO_ERROR) {
 			break;
 		}
@@ -451,14 +464,9 @@ int halo_ble_conn_adv_start(const struct halo_ble_adv_params *params)
 	}
 
 	if (err != GAP_ERR_NO_ERROR) {
-		k_mutex_unlock(&conn_ctx.lock);
 		LOG_ERR("gapm_le_create_adv_legacy failed: %u", err);
 		return -EIO;
 	}
-
-	conn_ctx.advertising = true;
-
-	k_mutex_unlock(&conn_ctx.lock);
 
 	/* Notify event */
 	struct halo_ble_event_data event = {
@@ -722,10 +730,13 @@ int halo_ble_conn_adv_stop(void)
 		return -ENODEV;
 	}
 
+	/* Host stack lock first, then conn_ctx.lock (see adv_start) */
+	alif_ble_mutex_lock(K_FOREVER);
 	k_mutex_lock(&conn_ctx.lock, K_FOREVER);
 
 	if (!conn_ctx.advertising) {
 		k_mutex_unlock(&conn_ctx.lock);
+		alif_ble_mutex_unlock();
 		return 0;
 	}
 
@@ -733,6 +744,7 @@ int halo_ble_conn_adv_stop(void)
 	err = gapm_stop_activity(conn_ctx.adv_idx);
 	if (err != GAP_ERR_NO_ERROR) {
 		k_mutex_unlock(&conn_ctx.lock);
+		alif_ble_mutex_unlock();
 		LOG_ERR("gapm_stop_activity failed: %u", err);
 		return -EIO;
 	}
@@ -741,6 +753,7 @@ int halo_ble_conn_adv_stop(void)
 	LOG_DBG("Advertising stopped");
 
 	k_mutex_unlock(&conn_ctx.lock);
+	alif_ble_mutex_unlock();
 
 	return 0;
 }
@@ -753,10 +766,17 @@ int halo_ble_conn_disconnect(void)
 		return -ENODEV;
 	}
 
+	/* Called from the button and power-management threads. Hold the host
+	 * stack lock (taken before conn_ctx.lock, see adv_start) from the
+	 * connected check through the call, so the link can't go away in
+	 * between.
+	 */
+	alif_ble_mutex_lock(K_FOREVER);
 	k_mutex_lock(&conn_ctx.lock, K_FOREVER);
 
 	if (!conn_ctx.connected) {
 		k_mutex_unlock(&conn_ctx.lock);
+		alif_ble_mutex_unlock();
 		return -ENOTCONN;
 	}
 
@@ -765,6 +785,7 @@ int halo_ble_conn_disconnect(void)
 
 	/* Disconnect using Alif BLE API */
 	gapc_disconnect(conidx, 0, LL_ERR_REMOTE_USER_TERM_CON, NULL);
+	alif_ble_mutex_unlock();
 
 	LOG_INF("Disconnecting conidx %u", conidx);
 	return 0;

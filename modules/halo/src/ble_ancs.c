@@ -221,18 +221,22 @@ static uint16_t ancs_write_cccd(uint8_t conidx, uint16_t hdl, uint16_t value, ui
 	co_buf_t *p_buf;
 	uint16_t err;
 
+	/* The co_buf pool belongs to the host stack: allocate and release
+	 * under its lock too, not just the write.
+	 */
+	alif_ble_mutex_lock(K_FOREVER);
 	err = co_buf_alloc(&p_buf, GATT_BUFFER_HEADER_LEN, 2, GATT_BUFFER_TAIL_LEN);
 	if (err != CO_BUF_ERR_NO_ERROR) {
+		alif_ble_mutex_unlock();
 		return GAP_ERR_INSUFF_RESOURCES;
 	}
 
 	co_write16(co_buf_data(p_buf), co_htole16(value));
 
-	alif_ble_mutex_lock(K_FOREVER);
 	err = gatt_cli_write(conidx, ctx.user_lid, metainfo, GATT_WRITE, hdl, 0, p_buf);
+	co_buf_release(p_buf);
 	alif_ble_mutex_unlock();
 
-	co_buf_release(p_buf);
 	return err;
 }
 
@@ -646,18 +650,20 @@ static int ancs_send_command(uint8_t conidx, uint16_t cp_hdl,
 	}
 
 	co_buf_t *p_buf;
+
+	alif_ble_mutex_lock(K_FOREVER);
 	uint16_t err = co_buf_alloc(&p_buf, GATT_BUFFER_HEADER_LEN, len, GATT_BUFFER_TAIL_LEN);
 
 	if (err != CO_BUF_ERR_NO_ERROR) {
+		alif_ble_mutex_unlock();
 		ancs_finish_command(-ENOMEM);
 		return -ENOMEM;
 	}
 	memcpy(co_buf_data(p_buf), buf, len);
 
-	alif_ble_mutex_lock(K_FOREVER);
 	err = gatt_cli_write(conidx, ctx.user_lid, ANCS_PROC_CMD, GATT_WRITE, cp_hdl, 0, p_buf);
-	alif_ble_mutex_unlock();
 	co_buf_release(p_buf);
+	alif_ble_mutex_unlock();
 
 	if (err != GAP_ERR_NO_ERROR) {
 		LOG_WRN("ANCS control point write failed: 0x%04x", err);

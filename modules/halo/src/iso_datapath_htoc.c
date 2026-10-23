@@ -179,8 +179,11 @@ int iso_datapath_htoc_bind(struct iso_datapath_htoc *const datapath)
 		return -EINVAL;
 	}
 
+	/* Called from the audio work queue and the BLE thread */
+	alif_ble_mutex_lock(K_FOREVER);
 	uint16_t const ret =
 		gapi_isooshm_dp_bind(&datapath->dp, datapath->stream_id, GAPI_DP_DIRECTION_INPUT);
+	alif_ble_mutex_unlock();
 
 	if (ret != GAP_ERR_NO_ERROR) {
 		LOG_ERR("Failed to bind datapath with err %u", ret);
@@ -203,7 +206,9 @@ int iso_datapath_htoc_unbind(struct iso_datapath_htoc *const datapath)
 
 	gapi_isooshm_sdu_buf_t *pending_buffer = NULL;
 
+	alif_ble_mutex_lock(K_FOREVER);
 	gapi_isooshm_dp_unbind(&datapath->dp, &pending_buffer);
+	alif_ble_mutex_unlock();
 
 	if (pending_buffer) {
 		/* Free the buffer that was pending in the datapath */
