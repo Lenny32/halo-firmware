@@ -2752,7 +2752,9 @@ int halo_ble_audio_deinit(void)
 	/* Clean up PACS records */
 	for (uint8_t i = 0; i < audio_ctx.pacs_record_count; i++) {
 		if (audio_ctx.pacs_records[i].p_capa) {
+			alif_ble_mutex_lock(K_FOREVER);
 			bap_capa_srv_remove_record(audio_ctx.pacs_records[i].record_id);
+			alif_ble_mutex_unlock();
 			halo_free(audio_ctx.pacs_records[i].p_capa);
 			audio_ctx.pacs_records[i].p_capa = NULL;
 		}

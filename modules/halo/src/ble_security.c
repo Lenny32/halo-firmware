@@ -528,7 +528,9 @@ int halo_ble_sec_pair_request(uint8_t conidx, uint8_t auth_level)
 	}
 
 	/* Initiate pairing using Alif BLE API */
+	alif_ble_mutex_lock(K_FOREVER);
 	err = gapc_le_request_security(conidx, auth_level);
+	alif_ble_mutex_unlock();
 	if (err != GAP_ERR_NO_ERROR) {
 		LOG_ERR("gapc_le_request_security failed: %u", err);
 		return -EIO;
@@ -555,7 +557,9 @@ int halo_ble_sec_pair_accept(uint8_t conidx)
 	pairing_info.oob = GAP_OOB_AUTH_DATA_NOT_PRESENT;
 
 	/* Accept pairing using Alif BLE API */
+	alif_ble_mutex_lock(K_FOREVER);
 	err = gapc_le_pairing_accept(conidx, true, &pairing_info, 0);
+	alif_ble_mutex_unlock();
 	if (err != GAP_ERR_NO_ERROR) {
 		LOG_ERR("gapc_le_pairing_accept failed: %u", err);
 		return -EIO;
@@ -573,7 +577,9 @@ int halo_ble_sec_pair_reject(uint8_t conidx)
 	}
 
 	/* Reject pairing using Alif BLE API */
+	alif_ble_mutex_lock(K_FOREVER);
 	err = gapc_le_pairing_accept(conidx, false, NULL, 0);
+	alif_ble_mutex_unlock();
 	if (err != GAP_ERR_NO_ERROR) {
 		LOG_ERR("gapc_le_pairing_accept (reject) failed: %u", err);
 		return -EIO;

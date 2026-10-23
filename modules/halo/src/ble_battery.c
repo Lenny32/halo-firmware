@@ -318,10 +318,15 @@ int halo_ble_battery_notify(uint8_t level)
 		return -ETIMEDOUT;
 	}
 
-	/* Allocate buffer */
+	/* The co_buf pool belongs to the host stack, so allocate and release
+	 * under its lock too, not just the send.
+	 */
+	alif_ble_mutex_lock(K_FOREVER);
+
 	co_buf_t *p_buf;
 	uint16_t status = co_buf_alloc(&p_buf, GATT_BUFFER_HEADER_LEN, 1, GATT_BUFFER_TAIL_LEN);
 	if (status != CO_BUF_ERR_NO_ERROR) {
+		alif_ble_mutex_unlock();
 		LOG_ERR("Buffer allocation failed: %u", status);
 		k_sem_give(&bas_ctx.notify_sem);
 		return -ENOMEM;
@@ -331,12 +336,11 @@ int halo_ble_battery_notify(uint8_t level)
 	*co_buf_data(p_buf) = level;
 
 	/* Send notification */
-	alif_ble_mutex_lock(K_FOREVER);
 	status = gatt_srv_event_send(bas_ctx.conidx, bas_ctx.user_lid, 0, GATT_NOTIFY,
 				     bas_ctx.start_hdl + BAS_IDX_BATTERY_LEVEL_VAL, p_buf);
-	alif_ble_mutex_unlock();
-
 	co_buf_release(p_buf);
+
+	alif_ble_mutex_unlock();
 
 	if (status != GAP_ERR_NO_ERROR) {
 		LOG_ERR("Failed to send level notification: 0x%04X", status);
@@ -358,21 +362,23 @@ static void notify_battery_state(uint8_t state)
 		return;
 	}
 
+	alif_ble_mutex_lock(K_FOREVER);
+
 	co_buf_t *p_buf;
 	uint16_t ret = co_buf_alloc(&p_buf, GATT_BUFFER_HEADER_LEN, 1, GATT_BUFFER_TAIL_LEN);
 	if (ret != CO_BUF_ERR_NO_ERROR) {
+		alif_ble_mutex_unlock();
 		LOG_ERR("Failed to allocate buffer for state notification");
 		return;
 	}
 
 	*co_buf_data(p_buf) = state;
 
-	alif_ble_mutex_lock(K_FOREVER);
 	ret = gatt_srv_event_send(bas_ctx.conidx, bas_ctx.user_lid, 0, GATT_NOTIFY,
 				  bas_ctx.start_hdl + BAS_IDX_BATTERY_STATE_VAL, p_buf);
-	alif_ble_mutex_unlock();
-
 	co_buf_release(p_buf);
+
+	alif_ble_mutex_unlock();
 
 	if (ret != GAP_ERR_NO_ERROR) {
 		LOG_ERR("Failed to send state notification: 0x%04X", ret);

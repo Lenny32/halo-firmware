@@ -31,6 +31,12 @@ release pages and tags are not publicly reachable.
   the link and Halo stopped advertising until power-cycled. It now takes
   the lock, and retries requests macOS refuses for a few seconds after
   some connects (#78).
+- Several calls into the Bluetooth host stack from other threads now take
+  its lock, as the parameter request fix above does: disconnecting (from
+  the 5 s button hold and from deep sleep), starting and stopping
+  advertising, buffer handling for battery and ANCS notifications, LE Audio
+  datapath setup and teardown, and the pairing API. None was seen to fail,
+  but each could race the Bluetooth thread (#79).
 - `PROTOCOL.md` said a full data receive buffer never loses data. A write
   without response that doesn't fit is dropped without the client knowing;
   the docs now give the pacing rule that avoids it (#78).
