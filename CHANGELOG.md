@@ -11,6 +11,30 @@ release pages and tags are not publicly reachable.
 
 ## [Unreleased]
 
+### Added
+
+- `frame.bluetooth.connection_interval([ms])` returns the current
+  connection interval, or asks the central for a new one (7.5–1000 ms).
+  macOS and iOS grant 15 ms (not 7.5 ms), Android 7.5 ms. With the
+  brilliant_sdk change that streams `sendMessage()` on Halo, a 128x128
+  4bpp image takes about 0.17 s at 15 ms, down from 0.3 s at the 30 ms
+  macOS and iOS pick by default (#78).
+- `frame.bluetooth.receive_buffer_size([bytes])` returns or resizes the
+  data receive buffer (1024–65536 bytes, default 4096). It returns to the
+  default when the Lua VM restarts (#78).
+
+### Fixed
+
+- `halo_ble_update_conn_params()` never sent a request (it passed no
+  completion callback) and called the Bluetooth host without its lock. From
+  another thread it could lose a write response, after which macOS dropped
+  the link and Halo stopped advertising until power-cycled. It now takes
+  the lock, and retries requests macOS refuses for a few seconds after
+  some connects (#78).
+- `PROTOCOL.md` said a full data receive buffer never loses data. A write
+  without response that doesn't fit is dropped without the client knowing;
+  the docs now give the pacing rule that avoids it (#78).
+
 ## [0.8.20] - 2026-10-16
 
 ### Added
