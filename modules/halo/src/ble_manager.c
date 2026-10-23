@@ -413,3 +413,12 @@ int halo_ble_update_conn_params(const struct halo_ble_conn_params *params)
 
 	return halo_ble_conn_update_params(params);
 }
+
+uint16_t halo_ble_get_conn_interval(void)
+{
+	if (!ble_ctx.initialized) {
+		return 0;
+	}
+
+	return halo_ble_conn_get_interval();
+}

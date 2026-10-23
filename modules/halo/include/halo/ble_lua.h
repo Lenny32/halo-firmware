@@ -143,6 +143,23 @@ int32_t halo_ble_lua_data_read_frame(uint8_t *data, size_t len);
 void halo_ble_lua_data_flush(void);
 
 /**
+ * @brief Resize the data receive ring
+ *
+ * Frames still queued are discarded, so call this before the peer starts
+ * sending. A peer that keeps at most size / (frame + 2) frames unacknowledged
+ * can never overflow the ring (frame + 2: each frame carries a length header).
+ *
+ * @param size Ring capacity in bytes
+ * @return 0, -ENODEV if the service is down, or -ENOMEM
+ */
+int halo_ble_lua_data_resize(size_t size);
+
+/**
+ * @brief Data receive ring capacity in bytes, 0 if the service is down
+ */
+size_t halo_ble_lua_data_size(void);
+
+/**
  * @brief Register a callback for queued data frames
  *
  * @param handler Callback function, or NULL to unregister

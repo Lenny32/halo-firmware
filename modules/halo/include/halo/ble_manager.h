@@ -224,6 +224,13 @@ int halo_ble_get_address(uint8_t addr[6]);
 int halo_ble_update_conn_params(const struct halo_ble_conn_params *params);
 
 /**
+ * @brief Get the current connection interval
+ *
+ * @return Interval in 1.25 ms units, 0 when not connected
+ */
+uint16_t halo_ble_get_conn_interval(void);
+
+/**
  * @brief Helper macro to create event mask
  * 
  * @param event Event type
