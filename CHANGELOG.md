@@ -37,6 +37,10 @@ release pages and tags are not publicly reachable.
   advertising, buffer handling for battery and ANCS notifications, LE Audio
   datapath setup and teardown, and the pairing API. None was seen to fail,
   but each could race the Bluetooth thread (#79).
+- Bluetooth startup (stack configuration, device name, and the battery,
+  Lua, OTA, LE Audio and ANCS service registrations) now takes the host
+  stack lock too. The Bluetooth thread is already running by then, and
+  the main thread preempts it when the stack reports configuration done.
 - `PROTOCOL.md` said a full data receive buffer never loses data. A write
   without response that doesn't fit is dropped without the client knowing;
   the docs now give the pacing rule that avoids it (#78).

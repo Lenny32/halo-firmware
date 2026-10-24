@@ -488,8 +488,10 @@ int halo_ble_battery_init(bool reset)
 					BPS_CHARGING_NOT_CHARGING | BPS_LEVEL_GOOD,
 		bas_ctx.conidx = GAP_INVALID_CONIDX;
 
+		alif_ble_mutex_lock(K_FOREVER);
 		ret = gatt_user_srv_register(CFG_MAX_LE_MTU, 0, &gatt_cbs, &bas_ctx.user_lid);
 		if (ret != GAP_ERR_NO_ERROR) {
+			alif_ble_mutex_unlock();
 			LOG_ERR("Failed to register GATT user service: %d", ret);
 			return -EIO;
 		}
@@ -498,6 +500,7 @@ int halo_ble_battery_init(bool reset)
 		uint8_t uuid[2] = {BAS_UUID_16 & 0xFF, BAS_UUID_16 >> 8};
 		ret = gatt_db_svc_add(bas_ctx.user_lid, SVC_UUID(16), uuid, BAS_IDX_NB, NULL,
 				      bas_att_db, BAS_IDX_NB, &bas_ctx.start_hdl);
+		alif_ble_mutex_unlock();
 		if (ret != GAP_ERR_NO_ERROR) {
 			LOG_ERR("Failed to add Battery Service: %d", ret);
 			return -EIO;

@@ -2305,59 +2305,16 @@ static bool frame_octet_within_capa(uint8_t const dir, uint8_t const sampling_fr
 /* ======================================================================================== */
 
 /**
- * @brief Initialize the LE Audio service
+ * @brief Configure the LE Audio profiles in the host stack (cold boot only)
  *
- * This function initializes all LE Audio components:
- * 1. Worker queue for async audio operations
- * 2. GAF Advertiser for LE Audio announcements
- * 3. BAP Unicast Server for audio streaming
- * 4. TMAP (Telephony and Media Audio Profile)
- * 5. PACS (Published Audio Capabilities Server)
- * 6. VCS (Volume Control Service)
+ * Called with the host stack lock held: the BLE thread is already running the stack.
  *
- * @param reset If true, reset the service state even if already initialized
  * @return 0 on success, negative error code on failure
  */
-int halo_ble_audio_init(bool reset)
+static int audio_configure_stack(void)
 {
-
-	if (audio_ctx.initialized == BLE_AUDIO_INIT_MAGIC) {
-		LOG_WRN("BLE Audio Service already initialized");
-		return 0;
-	}
-
-	if (reset) {
-		memset(&audio_ctx, 0, sizeof(audio_ctx));
-	}
-
-	k_work_queue_start(&worker_queue, worker_task_stack,
-			   K_KERNEL_STACK_SIZEOF(worker_task_stack), WORKER_PRIORITY, NULL);
-	k_thread_name_set(&worker_queue.thread, "ble_audio_workq");
-
 	int err;
 	size_t iter;
-
-	/* ------------------------------------------------------------------------------------ */
-	/* Step 2: Calculate number of ASEs based on location configuration                     */
-	/* ------------------------------------------------------------------------------------ */
-	audio_ctx.ase_config_sink.nb_ases = __builtin_popcount(LOCATION_SINK);
-	audio_ctx.ase_config_src.nb_ases = __builtin_popcount(LOCATION_SOURCE);
-	audio_ctx.total_ases = audio_ctx.ase_config_sink.nb_ases + audio_ctx.ase_config_src.nb_ases;
-
-	LOG_INF("ASE: sink=%u, src=%u", audio_ctx.ase_config_sink.nb_ases,
-		audio_ctx.ase_config_src.nb_ases);
-
-	if (audio_ctx.total_ases > MAX_NUMBER_OF_ASE) {
-		LOG_ERR("Number of ASEs exceeds maximum allowed (%u)", MAX_NUMBER_OF_ASE);
-		return -1;
-	}
-
-	/* Skip BAP/TMAP/PACS/VCS configuration if not reset (already configured in ROM) */
-	if (!reset) {
-		audio_ctx.pacs_record_count = 0;
-		audio_ctx.initialized = BLE_AUDIO_INIT_MAGIC;
-		return 0;
-	}
 
 	/* ------------------------------------------------------------------------------------ */
 	/* Step 3: Configure BAP Unicast Server                                                 */
@@ -2692,6 +2649,70 @@ aics_done:
 		}
 	}
 #endif /* CONFIG_HALO_BLE_AUDIO_MICS */
+
+	return 0;
+}
+
+/**
+ * @brief Initialize the LE Audio service
+ *
+ * This function initializes all LE Audio components:
+ * 1. Worker queue for async audio operations
+ * 2. GAF Advertiser for LE Audio announcements
+ * 3. BAP Unicast Server for audio streaming
+ * 4. TMAP (Telephony and Media Audio Profile)
+ * 5. PACS (Published Audio Capabilities Server)
+ * 6. VCS (Volume Control Service)
+ *
+ * @param reset If true, reset the service state even if already initialized
+ * @return 0 on success, negative error code on failure
+ */
+int halo_ble_audio_init(bool reset)
+{
+
+	if (audio_ctx.initialized == BLE_AUDIO_INIT_MAGIC) {
+		LOG_WRN("BLE Audio Service already initialized");
+		return 0;
+	}
+
+	if (reset) {
+		memset(&audio_ctx, 0, sizeof(audio_ctx));
+	}
+
+	k_work_queue_start(&worker_queue, worker_task_stack,
+			   K_KERNEL_STACK_SIZEOF(worker_task_stack), WORKER_PRIORITY, NULL);
+	k_thread_name_set(&worker_queue.thread, "ble_audio_workq");
+
+	int err;
+
+	/* ------------------------------------------------------------------------------------ */
+	/* Step 2: Calculate number of ASEs based on location configuration                     */
+	/* ------------------------------------------------------------------------------------ */
+	audio_ctx.ase_config_sink.nb_ases = __builtin_popcount(LOCATION_SINK);
+	audio_ctx.ase_config_src.nb_ases = __builtin_popcount(LOCATION_SOURCE);
+	audio_ctx.total_ases = audio_ctx.ase_config_sink.nb_ases + audio_ctx.ase_config_src.nb_ases;
+
+	LOG_INF("ASE: sink=%u, src=%u", audio_ctx.ase_config_sink.nb_ases,
+		audio_ctx.ase_config_src.nb_ases);
+
+	if (audio_ctx.total_ases > MAX_NUMBER_OF_ASE) {
+		LOG_ERR("Number of ASEs exceeds maximum allowed (%u)", MAX_NUMBER_OF_ASE);
+		return -1;
+	}
+
+	/* Skip BAP/TMAP/PACS/VCS configuration if not reset (already configured in ROM) */
+	if (!reset) {
+		audio_ctx.pacs_record_count = 0;
+		audio_ctx.initialized = BLE_AUDIO_INIT_MAGIC;
+		return 0;
+	}
+
+	alif_ble_mutex_lock(K_FOREVER);
+	err = audio_configure_stack();
+	alif_ble_mutex_unlock();
+	if (err) {
+		return err;
+	}
 
 	audio_ctx.initialized = BLE_AUDIO_INIT_MAGIC;
 
