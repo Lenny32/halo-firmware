@@ -427,8 +427,10 @@ int halo_ble_ota_init(bool reset)
 
 	if (reset) {
 		LOG_DBG("Registering OTA service");
+		alif_ble_mutex_lock(K_FOREVER);
 		err = gatt_user_srv_register(CFG_MAX_LE_MTU, 0, &gatt_cbs, &ota_ctx.user_lid);
 		if (err != GAP_ERR_NO_ERROR) {
+			alif_ble_mutex_unlock();
 			LOG_ERR("gatt_user_srv_register failed");
 			return err;
 		}
@@ -437,6 +439,7 @@ int halo_ble_ota_init(bool reset)
 		ota_ctx.conidx = GAP_INVALID_CONIDX;
 		err = gatt_db_svc_add(ota_ctx.user_lid, SVC_UUID(128), ota_srv_uuid, OTA_IDX_NB,
 				      NULL, ota_srv_att_db, OTA_IDX_NB, &ota_ctx.start_hdl);
+		alif_ble_mutex_unlock();
 		if (err != GAP_ERR_NO_ERROR) {
 			LOG_ERR("gatt_db_svc_add failed");
 			return -EIO;

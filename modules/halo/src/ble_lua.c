@@ -618,8 +618,10 @@ int halo_ble_lua_init(bool reset)
 		lua_ctx.start_hdl = GATT_INVALID_HDL;
 
 		/* Register GATT user service */
+		alif_ble_mutex_lock(K_FOREVER);
 		ret = gatt_user_srv_register(CFG_ATT_VAL_MAX, 0, &gatt_cbs, &lua_ctx.user_lid);
 		if (ret != GAP_ERR_NO_ERROR) {
+			alif_ble_mutex_unlock();
 			LOG_ERR("Failed to register GATT user service: %d", ret);
 			goto cleanup;
 		}
@@ -627,6 +629,7 @@ int halo_ble_lua_init(bool reset)
 		/* Add service to GATT database */
 		ret = gatt_db_svc_add(lua_ctx.user_lid, SVC_UUID(128), lua_srv_uuid, LUA_IDX_NB,
 				      NULL, lua_att_db, LUA_IDX_NB, &lua_ctx.start_hdl);
+		alif_ble_mutex_unlock();
 		if (ret != GAP_ERR_NO_ERROR) {
 			LOG_ERR("Failed to add Lua service: %d", ret);
 			goto cleanup;

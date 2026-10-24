@@ -1200,7 +1200,9 @@ int halo_ble_ancs_init(bool reset)
 
 	if (reset || !ctx.user_registered) {
 		ctx.user_lid = GATT_INVALID_USER_LID;
+		alif_ble_mutex_lock(K_FOREVER);
 		ret = gatt_user_cli_register(CFG_MAX_LE_MTU, 0, &gatt_cli_cbs, &ctx.user_lid);
+		alif_ble_mutex_unlock();
 		if (ret != GAP_ERR_NO_ERROR) {
 			LOG_ERR("Failed to register GATT client user: 0x%04x", ret);
 			return -EIO;

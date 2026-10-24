@@ -342,8 +342,14 @@ int halo_ble_conn_init(const char *device_name)
 			return err;
 		}
 
-		/* Configure GAPM with callbacks - this uses the real Alif API */
+		/* Configure GAPM with callbacks - this uses the real Alif API.
+		 * The BLE thread is already running the stack, so each call
+		 * takes the stack lock. The lock is released before each wait:
+		 * the completion callback runs on the BLE thread under it.
+		 */
+		alif_ble_mutex_lock(K_FOREVER);
 		err = gapm_configure(0, &gapm_cfg, &gapm_cbs, on_gapm_process_complete);
+		alif_ble_mutex_unlock();
 		if (err != GAP_ERR_NO_ERROR) {
 			LOG_ERR("gapm_configure failed: %u", err);
 			return -EIO;
@@ -354,6 +360,7 @@ int halo_ble_conn_init(const char *device_name)
 
 		/* Get device address */
 		gap_bdaddr_t identity;
+		alif_ble_mutex_lock(K_FOREVER);
 		gapm_get_identity(&identity);
 		memcpy(conn_ctx.device_addr, identity.addr, 6);
 
@@ -361,17 +368,21 @@ int halo_ble_conn_init(const char *device_name)
 		err = gapm_set_name(1, strlen(conn_ctx.device_name), conn_ctx.device_name,
 				    on_gapm_process_complete);
 		if (err != GAP_ERR_NO_ERROR) {
+			alif_ble_mutex_unlock();
 			LOG_ERR("gapm_set_name failed: %u", err);
 			return -EIO;
 		}
 
 		gapm_le_set_appearance(APPEARANCE);
+		alif_ble_mutex_unlock();
 
 		/* Wait for name to be set */
 		k_sem_take(&conn_ctx.gapm_sem, K_FOREVER);
 	}
 
+	alif_ble_mutex_lock(K_FOREVER);
 	gapc_le_power_set_callbacks(&le_pwr_cb);
+	alif_ble_mutex_unlock();
 
 	LOG_INF("BLE device name: %s", conn_ctx.device_name);
 
