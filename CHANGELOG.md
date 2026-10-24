@@ -11,6 +11,17 @@ release pages and tags are not publicly reachable.
 
 ## [Unreleased]
 
+### Fixed
+
+- A camera capture no longer freezes the Lua loop while the image is
+  processed. The capture thread and the Lua REPL share a priority, and with
+  time slicing off the ~0.5 s debayer/JPEG pass ran to completion before Lua
+  got the CPU back, so an app streaming the microphone while taking a photo
+  stopped sending audio for ~0.5 s per photo (the audio was buffered, not
+  lost). Threads at priority 7 and below now share the CPU in 5 ms slices.
+  On a dev kit the longest mic gap during a 640px photo went from ~0.5 s to
+  under 80 ms, and capture time was unchanged within 0.05 s.
+
 ## [0.8.21] - 2026-10-24
 
 ### Added
