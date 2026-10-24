@@ -117,6 +117,7 @@ struct ancs_ctx {
 	uint8_t sub_retries;
 	uint8_t disc_retries;
 	bool rediscover; /* service changed while discovery in flight */
+	bool disc_encrypted; /* last discovery started on an encrypted link */
 
 	/* Discovered handles */
 	uint16_t svc_start_hdl;
@@ -248,6 +249,7 @@ static uint16_t ancs_write_cccd(uint8_t conidx, uint16_t hdl, uint16_t value, ui
 static void ancs_start_discovery(void)
 {
 	uint8_t conidx;
+	bool encrypted = halo_ble_is_encrypted();
 
 	k_mutex_lock(&ancs_lock, K_FOREVER);
 	if (ctx.state != ANCS_STATE_CONNECTED || ctx.conidx == GAP_INVALID_CONIDX) {
@@ -256,6 +258,7 @@ static void ancs_start_discovery(void)
 	}
 	ctx.state = ANCS_STATE_DISCOVERING;
 	ctx.rediscover = false;
+	ctx.disc_encrypted = encrypted;
 	reset_handles();
 	conidx = ctx.conidx;
 	k_mutex_unlock(&ancs_lock);
@@ -356,6 +359,7 @@ static void on_discover_cmp(uint8_t conidx, uint8_t user_lid, uint16_t metainfo,
 	bool retry = false;
 	bool subscribe = false;
 	bool rediscover = false;
+	bool encrypted = halo_ble_is_encrypted();
 
 	k_mutex_lock(&ancs_lock, K_FOREVER);
 
@@ -380,8 +384,15 @@ static void on_discover_cmp(uint8_t conidx, uint8_t user_lid, uint16_t metainfo,
 	} else if (status == GAP_ERR_NO_ERROR || status == ATT_ERR_ATTRIBUTE_NOT_FOUND) {
 		/* Peer has no (complete) ANCS - e.g. Android central. iOS can
 		 * publish the service later; a Service Changed indication will
-		 * trigger rediscovery then. */
-		ctx.state = ANCS_STATE_UNAVAILABLE;
+		 * trigger rediscovery then. iOS can also answer discovery on a
+		 * link that is not yet encrypted without listing ANCS, so a
+		 * search before encryption is repeated once the link encrypts. */
+		if (!ctx.disc_encrypted && encrypted) {
+			ctx.state = ANCS_STATE_CONNECTED;
+			rediscover = true;
+		} else {
+			ctx.state = ANCS_STATE_UNAVAILABLE;
+		}
 		LOG_INF("ANCS not present on peer");
 	} else {
 		LOG_WRN("ANCS discovery failed: 0x%04x", status);
@@ -1109,8 +1120,9 @@ static int ancs_on_connected(uint8_t conidx)
 	reset_handles();
 	k_mutex_unlock(&ancs_lock);
 
-	/* Discover ANCS. If the link is not yet encrypted iOS still answers
-	 * primary service discovery; only the CCCD writes are gated. */
+	/* Discover ANCS. If the link is not yet encrypted iOS usually still
+	 * answers primary service discovery, but it can leave ANCS out; the
+	 * ENCRYPTED handler searches again in that case. */
 	ancs_start_discovery();
 	return 0;
 }
@@ -1144,7 +1156,8 @@ static int ancs_on_disconnected(uint8_t conidx)
 /* ENCRYPTED fires once the link is actually encrypted (after fresh pairing or
  * bonded reconnection). Subscription is gated on encryption, so this is the
  * point at which a pending subscribe can finally proceed - reset the retry
- * budget and nudge it. */
+ * budget and nudge it. A discovery that ran before encryption and found no
+ * ANCS is repeated now. */
 static int ancs_ble_event_handler(const struct halo_ble_event_data *event, void *user_data)
 {
 	ARG_UNUSED(user_data);
@@ -1156,10 +1169,20 @@ static int ancs_ble_event_handler(const struct halo_ble_event_data *event, void 
 		if (kick) {
 			ctx.sub_retries = 0;
 		}
+		bool rediscover = (ctx.state == ANCS_STATE_UNAVAILABLE && !ctx.disc_encrypted &&
+				   ctx.conidx != GAP_INVALID_CONIDX);
+		if (rediscover) {
+			ctx.state = ANCS_STATE_CONNECTED;
+			ctx.disc_retries = 0;
+		}
 		k_mutex_unlock(&ancs_lock);
 
 		if (kick) {
 			k_work_schedule(&ctx.sub_retry_work, K_MSEC(100));
+		}
+		if (rediscover) {
+			LOG_INF("Link encrypted, repeating ANCS discovery");
+			k_work_schedule(&ctx.disc_retry_work, K_NO_WAIT);
 		}
 	}
 	return 0;
