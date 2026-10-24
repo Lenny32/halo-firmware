@@ -39,6 +39,8 @@ struct iso_datapath_htoc {
 	uint8_t *sdu_timing_msgq_buffer;
 	uint16_t last_sdu_seq;
 	bool timing_master_channel;
+	/* Set by iso_datapath_htoc_abort() ahead of teardown */
+	bool stop;
 	/* Set (from the transfer-complete ISR) when the SDU queue was empty and the
 	 * datapath needs re-arming; test-and-cleared by the encoder thread when it
 	 * enqueues one. atomic_t so the ISR set and the thread's consume don't race. */
@@ -65,8 +67,17 @@ INT_RAMFUNC static void send_next_sdu(struct iso_datapath_htoc *const datapath, 
 		 * while DMA is not supported yet. Copy is synchronous at the moment
 		 * which could cause a race condition if incoming data is processed.
 		 * Can be removed when DMA is supported.
+		 *
+		 * Poll rather than wait: teardown runs on the BLE thread with the
+		 * lock held and joins the encoder thread, so give up once the
+		 * datapath is aborted.
 		 */
-		alif_ble_mutex_lock(K_FOREVER);
+		while (alif_ble_mutex_lock(K_MSEC(1)) != 0) {
+			if (datapath->stop) {
+				k_mem_slab_free(&datapath->sdu_queue->slab, p_sdu);
+				return;
+			}
+		}
 	}
 	ret = gapi_isooshm_dp_set_buf(&datapath->dp, p_sdu);
 	if (lock) {
@@ -196,6 +207,16 @@ int iso_datapath_htoc_bind(struct iso_datapath_htoc *const datapath)
 	return 0;
 }
 
+void iso_datapath_htoc_abort(struct iso_datapath_htoc *const datapath)
+{
+	if (!datapath) {
+		return;
+	}
+
+	datapath->stop = true;
+	atomic_set(&datapath->awaiting_sdu, 0);
+}
+
 int iso_datapath_htoc_unbind(struct iso_datapath_htoc *const datapath)
 {
 	if (!datapath) {
@@ -275,6 +296,10 @@ INT_RAMFUNC void iso_datapath_htoc_notify_sdu_available(void *const datapath,
 	}
 
 	struct iso_datapath_htoc *const iso_dp = datapath;
+
+	if (iso_dp->stop) {
+		return;
+	}
 
 	/* Consume the pending re-arm request atomically: only the context that
 	 * flips it 1->0 proceeds, so an ISR set and this consume can't both fire

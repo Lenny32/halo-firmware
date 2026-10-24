@@ -57,6 +57,16 @@ struct iso_datapath_htoc *iso_datapath_htoc_init(uint8_t stream_lid, struct sdu_
 int iso_datapath_htoc_bind(struct iso_datapath_htoc *datapath);
 
 /**
+ * @brief Stop sending SDUs, ahead of teardown
+ *
+ * Needs no host stack lock. A producer thread waiting for that lock in
+ * iso_datapath_htoc_notify_sdu_available() gives up instead.
+ *
+ * @param datapath The datapath instance to abort
+ */
+void iso_datapath_htoc_abort(struct iso_datapath_htoc *datapath);
+
+/**
  * @brief Unbind the datapath from the controller
  *
  * @param datapath The datapath instance to unbind
