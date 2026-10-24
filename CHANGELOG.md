@@ -11,6 +11,8 @@ release pages and tags are not publicly reachable.
 
 ## [Unreleased]
 
+## [0.8.21] - 2026-10-24
+
 ### Added
 
 - `frame.bluetooth.connection_interval([ms])` returns the current
