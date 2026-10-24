@@ -1083,11 +1083,19 @@ static int audio_datapath_cleanup_sink(void)
 
 	if (sink_datapath.decoder_tid) {
 		sink_datapath.thread_abort = true;
+		/* This can run on the BLE thread with the host stack lock held, and
+		 * the decoder takes that lock to re-arm a datapath. Abort the
+		 * datapaths first so it gives up instead of blocking the join. */
+		for (int i = 0; i < MAX_SINK_CHANNELS; i++) {
+			iso_datapath_ctoh_abort(sink_datapath.channel[i].iso_dp);
+		}
 		/* Wake the decoder immediately so the join doesn't block this GAF
 		 * host callback for up to the sem fallback (~100 ms); it's otherwise
 		 * parked in k_sem_take. The K_MSEC(500) below is just a safety cap. */
 		k_sem_give(&sink_datapath.data_ready);
-		k_thread_join(sink_datapath.decoder_tid, K_MSEC(500));
+		if (k_thread_join(sink_datapath.decoder_tid, K_MSEC(500)) != 0) {
+			LOG_WRN("Decoder thread did not exit");
+		}
 		sink_datapath.decoder_tid = NULL;
 	}
 
@@ -1444,7 +1452,14 @@ static int audio_datapath_cleanup_source(void)
 	/* Stop encoder thread */
 	if (source_datapath.encoder_tid) {
 		source_datapath.thread_abort = true;
-		k_thread_join(source_datapath.encoder_tid, K_MSEC(1000));
+		/* As for the decoder: the encoder takes the host stack lock to hand
+		 * the datapath an SDU, so abort the datapaths before the join. */
+		for (int ch = 0; ch < MAX_SOURCE_CHANNELS; ch++) {
+			iso_datapath_htoc_abort(source_datapath.channel[ch].iso_dp);
+		}
+		if (k_thread_join(source_datapath.encoder_tid, K_MSEC(1000)) != 0) {
+			LOG_WRN("Encoder thread did not exit");
+		}
 		source_datapath.encoder_tid = NULL;
 	}
 

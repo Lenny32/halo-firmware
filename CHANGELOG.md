@@ -42,6 +42,12 @@ release pages and tags are not publicly reachable.
   stack lock too. The Bluetooth thread is already running by then, and
   the main thread preempts it when the stack reports configuration done
   (#80).
+- Stopping an LE Audio stream waits for the decoder or encoder thread to
+  exit while the Bluetooth thread holds the host stack lock. If that thread
+  was itself waiting for the lock to hand the next buffer to the stack, the
+  wait ran to its 0.5 s (decoder) or 1 s (encoder) timeout and the stream
+  was freed while the thread was still using it. The datapaths are now
+  stopped first, and a thread waiting for the lock gives up.
 - `PROTOCOL.md` said a full data receive buffer never loses data. A write
   without response that doesn't fit is dropped without the client knowing;
   the docs now give the pacing rule that avoids it (#78).

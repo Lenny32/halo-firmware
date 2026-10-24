@@ -51,6 +51,17 @@ struct iso_datapath_ctoh *iso_datapath_ctoh_init(uint8_t stream_lid, struct sdu_
 int iso_datapath_ctoh_start(struct iso_datapath_ctoh *datapath);
 
 /**
+ * @brief Stop re-arming the datapath, ahead of teardown
+ *
+ * Unlike iso_datapath_ctoh_stop() this does not unbind, so it needs no
+ * host stack lock. A consumer thread waiting for that lock in
+ * iso_datapath_ctoh_notify_sdu_done() gives up instead.
+ *
+ * @param datapath The datapath instance to abort
+ */
+void iso_datapath_ctoh_abort(struct iso_datapath_ctoh *datapath);
+
+/**
  * @brief Stop fetching packets from isochronous stream
  *
  * @param datapath The datapath instance to stop

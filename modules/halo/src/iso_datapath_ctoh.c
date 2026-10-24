@@ -91,8 +91,17 @@ INT_RAMFUNC static int recv_next_sdu(struct iso_datapath_ctoh *const datapath, b
 		 * while DMA is not supported yet. Copy is synchronous at the moment
 		 * which could cause a race condition if incoming data is processed.
 		 * Can be removed when DMA is supported.
+		 *
+		 * Poll rather than wait: teardown runs on the BLE thread with the
+		 * lock held and joins the decoder thread, so give up once the
+		 * datapath is aborted.
 		 */
-		alif_ble_mutex_lock(K_FOREVER);
+		while (alif_ble_mutex_lock(K_MSEC(1)) != 0) {
+			if (datapath->stop) {
+				k_mem_slab_free(&sdu_queue->slab, p_sdu);
+				return -ECANCELED;
+			}
+		}
 	}
 	uint16_t const err = gapi_isooshm_dp_set_buf(&datapath->dp, p_sdu);
 	if (lock) {
@@ -233,6 +242,16 @@ int iso_datapath_ctoh_start(struct iso_datapath_ctoh *const datapath)
 	 */
 
 	return err;
+}
+
+void iso_datapath_ctoh_abort(struct iso_datapath_ctoh *const datapath)
+{
+	if (!datapath) {
+		return;
+	}
+
+	datapath->stop = true;
+	atomic_set(&datapath->awaiting_buffer, 0);
 }
 
 int iso_datapath_ctoh_stop(struct iso_datapath_ctoh *const datapath)
