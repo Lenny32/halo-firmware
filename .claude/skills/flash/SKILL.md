@@ -44,6 +44,22 @@ boot — so a good image sticks and a bad one auto-reverts. Don't use
 is not absolute: a half-alive image can self-confirm and still misbehave, which
 is exactly why real devices are flashed last.
 
+## Resetting the dev kit (SE-UART)
+
+A dev kit that stops responding (not advertising, no REPL) can be reset over
+its SE-UART with the Alif SETOOLS `maintenance` tool, without a power cycle:
+
+```
+SETOOLS_DIR=/path/to/setools alif/.claude/skills/flash/reset_devkit.sh
+```
+
+`SETOOLS_DIR` holds the `maintenance` binary and an `isp_config_data.cfg` whose
+`comport` is the SE-UART (pick it once with `./maintenance -d`; see the
+wired-flashing appendix of `SETUP.md`). The script drives the menu (Device
+Control → Device reset). Give the device ~10 s, then scan for it. Dev kits
+only: production units have no SE-UART. To see what happened, keep the console
+UART logging while you reproduce it (`logs` skill, `uart_console.py`).
+
 ## Recovering a non-booting device (BLE DFU mode)
 
 MCUboot enters **BLE DFU recovery mode** by itself when it finds no bootable
