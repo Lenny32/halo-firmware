@@ -52,7 +52,8 @@ release pages and tags are not publicly reachable.
   connection. On a bonded reconnect, Halo searches for the service as soon
   as the phone connects, and an iPhone could answer that search before the
   link was encrypted without listing the service. A search that ran before
-  encryption and found nothing is now repeated once the link encrypts.
+  encryption and found nothing is now repeated once the link encrypts
+  (#82).
 - `PROTOCOL.md` said a full data receive buffer never loses data. A write
   without response that doesn't fit is dropped without the client knowing;
   the docs now give the pacing rule that avoids it (#78).
