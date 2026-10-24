@@ -40,7 +40,8 @@ release pages and tags are not publicly reachable.
 - Bluetooth startup (stack configuration, device name, and the battery,
   Lua, OTA, LE Audio and ANCS service registrations) now takes the host
   stack lock too. The Bluetooth thread is already running by then, and
-  the main thread preempts it when the stack reports configuration done.
+  the main thread preempts it when the stack reports configuration done
+  (#80).
 - `PROTOCOL.md` said a full data receive buffer never loses data. A write
   without response that doesn't fit is dropped without the client knowing;
   the docs now give the pacing rule that avoids it (#78).
