@@ -48,6 +48,11 @@ release pages and tags are not publicly reachable.
   wait ran to its 0.5 s (decoder) or 1 s (encoder) timeout and the stream
   was freed while the thread was still using it. The datapaths are now
   stopped first, and a thread waiting for the lock gives up (#81).
+- iPhone notifications (ANCS) could stay unavailable for a whole
+  connection. On a bonded reconnect, Halo searches for the service as soon
+  as the phone connects, and an iPhone could answer that search before the
+  link was encrypted without listing the service. A search that ran before
+  encryption and found nothing is now repeated once the link encrypts.
 - `PROTOCOL.md` said a full data receive buffer never loses data. A write
   without response that doesn't fit is dropped without the client knowing;
   the docs now give the pacing rule that avoids it (#78).
