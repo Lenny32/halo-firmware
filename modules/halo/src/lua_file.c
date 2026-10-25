@@ -178,17 +178,11 @@ static int lua_file_write(lua_State *L)
 	return 0;
 }
 
-/**
- * @brief Lua: file:close()
- *
- * Close file handle.
- */
-static int lua_file_close(lua_State *L)
+/* Closes the stream if open; returns fs_close()'s result (0 if already closed) */
+static int file_stream_close(file_stream_t *stream)
 {
-	file_stream_t *stream = (file_stream_t *)luaL_checkudata(L, 1, LUA_FILEHANDLE);
-
 	if (!stream->is_open) {
-		return 0; /* Already closed */
+		return 0;
 	}
 
 	int ret = fs_close(&stream->file);
@@ -198,6 +192,31 @@ static int lua_file_close(lua_State *L)
 
 	stream->is_open = false;
 	LOG_DBG("File closed");
+	return ret;
+}
+
+/**
+ * @brief Lua: file:close()
+ *
+ * Close file handle. Raises an error if the close fails: closing commits a
+ * written file (littlefs keeps the previous contents until then), so a
+ * failure, e.g. for lack of space, means the write did not take.
+ */
+static int lua_file_close(lua_State *L)
+{
+	file_stream_t *stream = (file_stream_t *)luaL_checkudata(L, 1, LUA_FILEHANDLE);
+	int ret = file_stream_close(stream);
+
+	if (ret < 0) {
+		return luaL_error(L, "error closing file: %d", ret);
+	}
+	return 0;
+}
+
+/* __gc: close an unclosed handle without raising (errors can't propagate here) */
+static int lua_file_gc(lua_State *L)
+{
+	file_stream_close((file_stream_t *)luaL_checkudata(L, 1, LUA_FILEHANDLE));
 	return 0;
 }
 
@@ -589,7 +608,7 @@ static const luaL_Reg file_methods[] = {
 /* Metatable methods */
 static const luaL_Reg meta_methods[] = {
 	{"__index", NULL},           /* Will be set to file_methods table */
-	{"__gc", lua_file_close},    /* Auto-close on garbage collection */
+	{"__gc", lua_file_gc},       /* Auto-close on garbage collection */
 	{"__close", lua_file_close}, /* Close on explicit close */
 	{NULL, NULL},
 };

@@ -28,6 +28,11 @@ release pages and tags are not publicly reachable.
   lost). Threads at priority 7 and below now share the CPU in 5 ms slices.
   On a dev kit the longest mic gap during a 640px photo went from ~0.5 s to
   under 80 ms, and capture time was unchanged within 0.05 s.
+- `file:close()` raises an error when closing fails. Closing commits a
+  written file (littlefs keeps the previous contents until then), and the
+  error was only logged, so a write that could not be committed, for
+  example for lack of space, looked successful while the old file stayed.
+  A file closed by the garbage collector still only logs the error.
 
 ## [0.8.21] - 2026-10-24
 
