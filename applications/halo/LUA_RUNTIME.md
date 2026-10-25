@@ -278,7 +278,9 @@ frame.display.brightness(0-100)
 ### Camera (`frame.camera`)
 
 ```lua
-frame.camera.capture({resolution = 640, quality = "HIGH"})
+frame.camera.power_save(false)   -- returns at once; the camera wakes in the background
+local awake = frame.camera.is_awake()
+frame.camera.capture({resolution = 640, quality = "HIGH"})  -- waits for a wake still running
 local ready = frame.camera.image_ready()
 local jpeg = frame.camera.read(1024)
 ```
