@@ -269,6 +269,25 @@ static int camera_dequeue_cancelable(struct video_buffer **vbuf)
 }
 
 /**
+ * @brief Stop the stream and take back the raw buffer, wherever it is
+ *
+ * A capture stopped mid-frame leaves the buffer in the driver's queue (or the
+ * driver's completion work hands it back after the stop). Enqueuing it again
+ * corrupts the queue: the buffer comes straight back as a "frame", and
+ * draining the queue then loops forever.
+ */
+static void camera_stream_reset(void)
+{
+	struct video_buffer *stale;
+
+	video_stream_stop(camera_state.video);
+	video_flush(camera_state.video, VIDEO_EP_OUT, true);
+
+	while (video_dequeue(camera_state.video, VIDEO_EP_OUT, &stale, K_NO_WAIT) == 0) {
+	}
+}
+
+/**
  * @brief Camera capture thread function
  *
  * Waits for capture triggers, acquires frames, and processes with libmpix
@@ -312,6 +331,9 @@ static void camera_capture_thread(void *p0, void *p1, void *p2)
 
 		/* Clear ready flag */
 		camera_state.ready = false;
+
+		/* Start from empty queues, whatever an earlier capture left */
+		camera_stream_reset();
 
 		/* Skip frames for warmup */
 		camera_state.thread_stage = CAM_STAGE_WARMUP;
@@ -383,22 +405,13 @@ static void camera_capture_thread(void *p0, void *p1, void *p2)
 
 capture_cancel:
 		camera_state.thread_stage = CAM_STAGE_STOPPING;
-		video_stream_stop(camera_state.video);
+		camera_stream_reset();
 		camera_state.ready = false;
 		continue;
 
 capture_error:
 		camera_state.thread_stage = CAM_STAGE_STOPPING;
-		/* Flush and drain queues so the next capture starts cleanly. */
-		video_flush(camera_state.video, VIDEO_EP_OUT, true);
-
-		/* Drain output FIFO after flush. */
-		struct video_buffer *stale;
-
-		while (video_dequeue(camera_state.video, VIDEO_EP_OUT,
-				     &stale, K_NO_WAIT) == 0) {
-		}
-
+		camera_stream_reset();
 		camera_state.ready = false;
 		camera_state.capture_error = true;
 		LOG_ERR("Capture error - flag set for Lua thread");
