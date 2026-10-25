@@ -33,6 +33,10 @@ release pages and tags are not publicly reachable.
   error was only logged, so a write that could not be committed, for
   example for lack of space, looked successful while the old file stayed.
   A file closed by the garbage collector still only logs the error.
+- After the camera was put to sleep (`frame.camera.power_save(true)`), or
+  Halo went to standby, during a capture, the next capture could fail. A
+  capture that is stopped part-way now leaves the camera ready for the
+  next one.
 
 ## [0.8.21] - 2026-10-24
 
