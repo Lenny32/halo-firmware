@@ -11,6 +11,13 @@ release pages and tags are not publicly reachable.
 
 ## [Unreleased]
 
+### Changed
+
+- The I2C bus shared by the camera, display and display bias supply runs at
+  400 kHz (was the 100 kHz default), the fastest all three support. Waking
+  the camera writes 48 sensor registers, which now takes 17 ms instead of
+  46 ms.
+
 ### Fixed
 
 - A camera capture no longer freezes the Lua loop while the image is
