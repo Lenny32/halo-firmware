@@ -32,6 +32,7 @@ LOG_MODULE_REGISTER(lua_camera, CONFIG_HALO_LOG_LEVEL);
 enum camera_thread_stage {
 	CAM_STAGE_IDLE = 0,
 	CAM_STAGE_WAIT_TRIGGER,
+	CAM_STAGE_WAKING,
 	CAM_STAGE_WARMUP,
 	CAM_STAGE_DEQUEUE,
 	CAM_STAGE_PROCESS,
@@ -103,6 +104,16 @@ static struct {
 	bool initialized;
 	volatile bool capture_error;
 	volatile enum camera_thread_stage thread_stage;
+
+	/* Background wake: power_save(false) hands the video device's resume
+	 * (the sensor's reset and register setup) to the capture thread, so
+	 * Lua is not blocked. waking is set until the resume finishes; a
+	 * power_save(true) meanwhile sets wake_cancel instead of waiting.
+	 * wake_error holds a failed resume's error until the next wake. */
+	volatile bool wake_pending;
+	volatile bool waking;
+	volatile bool wake_cancel;
+	volatile int wake_error;
 } camera_state = {
 	.video = NULL,
 	.vbuf_raw = NULL,
@@ -268,6 +279,99 @@ static int camera_dequeue_cancelable(struct video_buffer **vbuf)
 	return -ECANCELED;
 }
 
+/* Guards waking/wake_cancel between the Lua thread and the capture thread */
+static K_MUTEX_DEFINE(camera_wake_lock);
+
+static int camera_video_pm(enum pm_device_action action)
+{
+	int ret = 0;
+
+#ifdef CONFIG_PM_DEVICE
+	if (camera_state.video != NULL) {
+		ret = pm_device_action_run(camera_state.video, action);
+		if (ret == -EALREADY || ret == -ENOSYS) {
+			ret = 0;
+		}
+	}
+#endif
+	return ret;
+}
+
+/**
+ * @brief Resume the video device on the capture thread (background wake)
+ *
+ * The sensor's reset sequence can't be interrupted, so power_save(true)
+ * during a wake only sets wake_cancel: the device is suspended again here as
+ * soon as the resume finishes. A power_save(false) in the meantime clears
+ * wake_cancel and the camera stays (or comes back) up.
+ */
+static void camera_wake_run(void)
+{
+	int ret;
+
+	camera_state.thread_stage = CAM_STAGE_WAKING;
+	camera_state.wake_pending = false;
+
+	while (true) {
+		ret = camera_video_pm(PM_DEVICE_ACTION_RESUME);
+		if (ret != 0) {
+			/* Back to power save so the next power_save(false) retries
+			 * the resume instead of reporting "already active". */
+			LOG_ERR("Failed to resume video device: %d", ret);
+			k_mutex_lock(&camera_wake_lock, K_FOREVER);
+			camera_state.wake_error = ret;
+			camera_state.wake_cancel = false;
+			camera_service.is_active = false;
+			camera_state.waking = false;
+			k_mutex_unlock(&camera_wake_lock);
+			return;
+		}
+
+		k_mutex_lock(&camera_wake_lock, K_FOREVER);
+		if (!camera_state.wake_cancel) {
+			camera_state.waking = false;
+			k_mutex_unlock(&camera_wake_lock);
+			return;
+		}
+		k_mutex_unlock(&camera_wake_lock);
+
+		LOG_DBG("Wake cancelled: suspending again");
+		ret = camera_video_pm(PM_DEVICE_ACTION_SUSPEND);
+		if (ret != 0) {
+			LOG_ERR("Failed to suspend video device: %d", ret);
+		}
+
+		k_mutex_lock(&camera_wake_lock, K_FOREVER);
+		if (camera_state.wake_cancel) {
+			camera_state.wake_cancel = false;
+			camera_state.waking = false;
+			k_mutex_unlock(&camera_wake_lock);
+			return;
+		}
+		k_mutex_unlock(&camera_wake_lock);
+		/* Woken again while suspending: resume once more */
+	}
+}
+
+/**
+ * @brief Wait for a background wake to finish
+ *
+ * @return 0 when the camera is usable, or the resume's error
+ */
+static int camera_wake_wait(void)
+{
+	/* A resume takes well under a second, even with I2C retries */
+	for (int i = 0; camera_state.waking && i < 200; i++) {
+		k_msleep(5);
+	}
+
+	if (camera_state.waking) {
+		return -ETIMEDOUT;
+	}
+
+	return camera_state.wake_error;
+}
+
 /**
  * @brief Stop the stream and take back the raw buffer, wherever it is
  *
@@ -308,6 +412,11 @@ static void camera_capture_thread(void *p0, void *p1, void *p2)
 		if (camera_state.thread_should_exit) {
 			LOG_DBG("Capture thread exit while waiting trigger");
 			break;
+		}
+
+		if (camera_state.wake_pending) {
+			camera_wake_run();
+			continue;
 		}
 		/* Wait for capture trigger */
 		int wait_ret = k_sem_take(&camera_state.capture_sem, K_MSEC(10));
@@ -536,6 +645,13 @@ static void camera_cleanup_resources(void)
 		thread_stopped_cleanly = false;
 	}
 
+	/* A wake the thread never started leaves the device suspended */
+	if (camera_state.wake_pending) {
+		camera_state.wake_pending = false;
+		camera_state.waking = false;
+		camera_service.is_active = false;
+	}
+
 	if (!thread_stopped_cleanly) {
 		/* Keep buffers if the worker did not stop cleanly. */
 		camera_state.ready = false;
@@ -623,6 +739,13 @@ static int lua_camera_capture(lua_State *L)
 
 	if (!camera_service.is_active) {
 		return luaL_error(L, "camera is asleep");
+	}
+
+	/* Capturing straight after power_save(false) waits here for the rest of
+	 * the wake, as power_save(false) itself used to */
+	ret = camera_wake_wait();
+	if (ret != 0) {
+		return luaL_error(L, "camera failed to wake: %d", ret);
 	}
 
 	if (camera_state.jpeg_buffer == NULL) {
@@ -833,6 +956,24 @@ static int lua_camera_read_raw(lua_State *L)
 }
 
 /**
+ * @brief Lua: frame.camera.is_awake()
+ *
+ * True once a power_save(false) wake has finished and capture() will not
+ * wait; false while asleep or still waking. Raises if the wake failed.
+ */
+static int lua_camera_is_awake(lua_State *L)
+{
+	if (camera_state.wake_error != 0 && !camera_state.waking) {
+		int err = camera_state.wake_error;
+
+		return luaL_error(L, "camera failed to wake: %d", err);
+	}
+
+	lua_pushboolean(L, camera_service.is_active && !camera_state.waking);
+	return 1;
+}
+
+/**
  * @brief Lua: frame.camera.power_save(enable)
  *
  * Enable/disable camera power save mode
@@ -925,6 +1066,19 @@ static int camera_service_event_handler(halo_lua_event_t event, void *user_data)
 		bool was_active = camera_service.is_active;
 
 		if (was_active) {
+			/* A wake in progress is cancelled rather than waited for: the
+			 * capture thread suspends the device once its reset sequence
+			 * (which can't be interrupted) is done. */
+			k_mutex_lock(&camera_wake_lock, K_FOREVER);
+			if (camera_state.waking) {
+				camera_state.wake_cancel = true;
+				camera_service.is_active = false;
+				k_mutex_unlock(&camera_wake_lock);
+				ret = 0;
+				break;
+			}
+			k_mutex_unlock(&camera_wake_lock);
+
 			/* Block new capture calls before stopping the worker thread. */
 			camera_service.is_active = false;
 
@@ -950,21 +1104,38 @@ static int camera_service_event_handler(halo_lua_event_t event, void *user_data)
 		break;
 
 	case HALO_LUA_EVENT_RESUME:
-		/* Note: Only called if SUSPEND returned 0 (i.e. was_active was true) */
-#ifdef CONFIG_PM_DEVICE
-		if (camera_state.video != NULL) {
-			ret = pm_device_action_run(camera_state.video, PM_DEVICE_ACTION_RESUME);
-			if (ret == -EALREADY || ret == -ENOSYS) {
-				ret = 0;
-			} else if (ret != 0) {
-				/* Stay in power save so the next power_save(false) retries the
-				 * resume instead of reporting "already active". */
-				LOG_ERR("Failed to resume video device: %d", ret);
+		/* Called by power_save(false), and on system resume only if SUSPEND
+		 * returned 0 (was_active). The video device resumes on the capture
+		 * thread (camera_wake_run), so this returns without waiting for the
+		 * sensor's reset sequence; capture() waits for it if need be. */
+		k_mutex_lock(&camera_wake_lock, K_FOREVER);
+		if (camera_state.waking) {
+			/* A cancelled wake is still running: keep it */
+			camera_state.wake_cancel = false;
+			camera_service.is_active = true;
+			k_mutex_unlock(&camera_wake_lock);
+			break;
+		}
+		k_mutex_unlock(&camera_wake_lock);
+
+		if (camera_state.capture_thread_tid == NULL) {
+			ret = camera_thread_start();
+			if (ret < 0) {
 				break;
 			}
 		}
-#endif
-		/* Restore active state so Lua can use the camera after resuming */
+
+		/* No capture_sem give: the thread polls wake_pending every 10 ms,
+		 * and a trigger left over after the wake would start a capture
+		 * nobody asked for. Clear any stale one for the same reason. */
+		k_sem_reset(&camera_state.capture_sem);
+		k_mutex_lock(&camera_wake_lock, K_FOREVER);
+		camera_state.wake_error = 0;
+		camera_state.waking = true;
+		camera_state.wake_pending = true;
+		k_mutex_unlock(&camera_wake_lock);
+
+		/* Lua can call capture() now; it waits for the wake to finish */
 		camera_service.is_active = true;
 		break;
 
@@ -1022,6 +1193,9 @@ int lua_open_camera_library(lua_State *L)
 
 	lua_pushcfunction(L, lua_camera_power_save);
 	lua_setfield(L, -2, "power_save");
+
+	lua_pushcfunction(L, lua_camera_is_awake);
+	lua_setfield(L, -2, "is_awake");
 
 	luaopen_mpix(L);
 	lua_setfield(L, -2, "mpix");

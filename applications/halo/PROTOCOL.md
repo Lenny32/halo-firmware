@@ -2119,6 +2119,7 @@ Camera module APIs.
 | `camera.read(bytes)` | `<bytes: number>` | `string/nil` | Read JPEG data |
 | `camera.read_raw(bytes)` | `<bytes: number>` | `string/nil` | Read raw data |
 | `camera.power_save(flag)` | `<flag: boolean>` | `nil` | Enable/disable power save mode |
+| `camera.is_awake()` | None | `boolean` | Whether a wake has finished |
 
 #### `frame.camera.capture(cfg)`
 
@@ -2138,10 +2139,12 @@ Starts image capture (async). Triggers the camera to capture an image with optio
       `"LOW"` and `"VERY_LOW"` currently produce the same output; the other
       settings differ substantially (a 640 px capture encodes to roughly
       80/47/25/16 KB from `"VERY_HIGH"` down to `"LOW"`)
-- **Returns:** `nil`
+- **Returns:** `nil`. If called while a `power_save(false)` wake is still
+  running, it first waits for the wake to finish.
 - **Errors:**
   - Throws an error if the camera is not initialized
   - Throws an error if the camera is in sleep mode (call `camera.power_save(false)` first)
+  - Throws an error if the camera failed to wake (`camera failed to wake: <code>`)
   - Throws an error if the JPEG buffer is not allocated
   - Throws an error if the resolution is not supported (only 640 is currently supported)
   - Throws an error if the quality setting is invalid
@@ -2239,7 +2242,15 @@ Read raw sensor data. This function should be called after `image_ready()` retur
 
 #### `frame.camera.power_save(flag)`
 
-Enable or disable camera power save mode. When enabled, the camera enters a low-power state. When disabled, the camera is activated and ready for capture operations.
+Enable or disable camera power save mode. When enabled, the camera enters a low-power state. When disabled, the camera is woken for capture operations.
+
+Waking the camera (resetting and configuring the sensor) runs in the
+background: `power_save(false)` returns at once, and the Lua script keeps
+running while the camera wakes. `capture()` can be called straight away (it
+waits for the rest of the wake), or the script can poll `is_awake()` and
+capture once it returns `true`, so that nothing blocks.
+`power_save(true)` during a wake cancels it without waiting; the camera goes
+back to sleep as soon as the sensor's reset sequence ends.
 
 - **Parameters:**
   - `flag`: Boolean value (`true` to enable power save mode, `false` to disable it)
@@ -2254,8 +2265,31 @@ Enable or disable camera power save mode. When enabled, the camera enters a low-
   -- Disable power save mode (wake up camera)
   frame.camera.power_save(false)
   
-  -- Now we can capture an image
+  -- Now we can capture an image (waits for the wake to finish if need be)
   frame.camera.capture({ resolution = 640, quality = "HIGH" })
+  ```
+
+#### `frame.camera.is_awake()`
+
+Whether the camera has finished waking after `power_save(false)`, so that
+`capture()` will start at once.
+
+- **Parameters:** None
+- **Returns:** `boolean` - `true` once the wake has finished, `false` while
+  the camera is asleep or still waking
+- **Errors:**
+  - Throws an error if the wake failed (`camera failed to wake: <code>`); the
+    camera stays in power save mode, and the next `power_save(false)` tries
+    again
+- **Example:**
+  ```lua
+  frame.camera.power_save(false)
+  -- the script's loop keeps running until the camera is ready
+  while not frame.camera.is_awake() do
+      -- other work
+      frame.sleep(0.005)
+  end
+  frame.camera.capture({ resolution = 640, quality = "MEDIUM" })
   ```
 
 ---

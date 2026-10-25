@@ -11,12 +11,21 @@ release pages and tags are not publicly reachable.
 
 ## [Unreleased]
 
+### Added
+
+- `frame.camera.is_awake()` reports whether the camera has finished waking.
+
 ### Changed
 
 - The I2C bus shared by the camera, display and display bias supply runs at
   400 kHz (was the 100 kHz default), the fastest all three support. Waking
   the camera writes 48 sensor registers, which now takes 17 ms instead of
   46 ms.
+- `frame.camera.power_save(false)` returns at once and the camera wakes in
+  the background; it used to block the Lua script until the camera was
+  ready. `capture()` waits for a wake still in progress, so scripts that
+  wake and capture straight away work as before. `power_save(true)` during
+  a wake cancels it without waiting.
 
 ### Fixed
 
