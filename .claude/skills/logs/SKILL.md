@@ -31,3 +31,18 @@ then resets the Lua VM so the device resumes its app.
   so large logs take a while.
 - Always pass `--name`; same device etiquette as the `flash` skill: prefer
   the Halo Dev Kit; touch real units only with explicit user go-ahead.
+
+## Console UART (wired dev kit)
+
+A wired dev kit's console UART (115200 8N1) carries the Zephyr log output
+live, with no BLE link or FS log backend needed, so it keeps logging across
+resets. Leave it running in the background while reproducing a problem:
+
+```
+uv run alif/.claude/skills/logs/uart_console.py --out console.log
+```
+
+It timestamps each line and autodetects the console port as the USB serial
+port that is not the SE-UART named in `$SETOOLS_DIR/isp_config_data.cfg`
+(pass `--port` otherwise). The console is silent until the firmware logs
+something. To reset the dev kit, see the `flash` skill (`reset_devkit.sh`).
